@@ -1,0 +1,112 @@
+import argparse
+import json
+import sys
+import traceback
+
+from stream_parser.models import ParserResult
+from stream_parser.extractors.generic_static import GenericStaticExtractor
+from stream_parser.extractors.browser_network import BrowserNetworkExtractor
+
+def print_json_result(result: ParserResult):
+    print(json.dumps(result.to_dict(), ensure_ascii=False))
+
+def main():
+    parser = argparse.ArgumentParser(
+    description="Universal stream URL parser for RadioApp."
+    )
+
+
+    parser.add_argument(
+        "--url",
+        required=True,
+        help="Radio station page URL."
+    )
+
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=15,
+        help="HTTP/browser timeout in seconds."
+    )
+
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print debug logs to stderr."
+    )
+
+    args = parser.parse_args()
+
+    diagnostics = []
+
+    try:
+        static_extractor = GenericStaticExtractor(
+            timeout=args.timeout,
+            debug=args.debug
+        )
+
+        if static_extractor.can_handle(args.url):
+            try:
+                static_result = static_extractor.discover(args.url)
+            except Exception as ex:
+                from stream_parser.models import ParserResult
+                static_result = ParserResult(
+                    success=False,
+                    inputUrl=args.url,
+                    candidates=[],
+                    diagnostics=[
+                        "Generic static extractor failed but browser fallback will continue.",
+                        f"Generic static extractor error: {type(ex).__name__}: {ex}"
+                    ],
+                    error=str(ex)
+                )
+            diagnostics.extend(static_result.diagnostics)
+
+            if static_result.success and static_result.candidates:
+                static_result.diagnostics = diagnostics
+                print_json_result(static_result)
+                return
+
+        browser_extractor = BrowserNetworkExtractor(
+            timeout=args.timeout,
+            debug=args.debug
+        )
+
+        if browser_extractor.can_handle(args.url):
+            browser_result = browser_extractor.discover(args.url)
+            diagnostics.extend(browser_result.diagnostics)
+
+            if browser_result.success and browser_result.candidates:
+                browser_result.diagnostics = diagnostics
+                print_json_result(browser_result)
+                return
+
+        result = ParserResult(
+            success=False,
+            inputUrl=args.url,
+            candidates=[],
+            diagnostics=diagnostics,
+            error="No playable stream candidates found."
+        )
+
+        print_json_result(result)
+
+    except Exception as ex:
+        if args.debug:
+            print(f"[ERROR] {type(ex).__name__}: {ex}", file=sys.stderr)
+            print(traceback.format_exc(), file=sys.stderr)
+
+        result = ParserResult(
+            success=False,
+            inputUrl=args.url,
+            candidates=[],
+            diagnostics=diagnostics,
+            error=str(ex)
+        )
+
+        print_json_result(result)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
