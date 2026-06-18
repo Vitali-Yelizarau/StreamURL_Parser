@@ -1,0 +1,1 @@
+.\.venv\Scripts\pyinstaller --onedir --name stream_parser --noconfirm --collect-all playwright stream_parser\main.py

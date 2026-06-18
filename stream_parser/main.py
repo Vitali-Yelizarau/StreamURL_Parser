@@ -10,7 +10,11 @@ from stream_parser.extractors.browser_network import BrowserNetworkExtractor
 from stream_parser.stream_validator import StreamValidator
 
 def print_json_result(result: ParserResult):
-    print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    import sys
+    output = json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
+    # Принудительно пишем в UTF-8 — важно для exe на Windows с cp1251 консолью
+    sys.stdout.buffer.write((output + "\n").encode("utf-8"))
+    sys.stdout.buffer.flush()
 
 def _is_direct_stream_url(url: str) -> bool:
     """
@@ -55,6 +59,52 @@ def main():
     try:
         # Прямая ссылка на аудио-поток — валидируем без запуска экстракторов
         if _is_direct_stream_url(args.url):
+            # M3U/PLS плейлист — парсим содержимое вместо прямой валидации
+            parsed_input = urlparse(args.url.lower())
+            is_playlist = any(parsed_input.path.endswith(ext)
+                              for ext in (".m3u", ".m3u8", ".pls", ".xspf"))
+            if is_playlist:
+                diagnostics.append("Input URL looks like a playlist. Downloading and parsing.")
+                from stream_parser.http_client import HttpClient
+                http = HttpClient(timeout=args.timeout, debug=args.debug)
+                playlist_text = http.download_text_safe(args.url)
+                validator = StreamValidator(timeout=args.timeout, debug=args.debug)
+                m3u_result = validator._try_parse_m3u_response(args.url, playlist_text)
+                if m3u_result and m3u_result.is_playable:
+                    candidate = StreamCandidate(
+                        url=m3u_result.final_url or args.url,
+                        title="",
+                        source="direct_url",
+                        confidence=99,
+                        reason="Parsed from playlist. Validated as playable audio stream.",
+                        originUrl=args.url,
+                        originType="playlist",
+                        originalUrl=m3u_result.final_url or args.url,
+                        stableUrl=m3u_result.final_url or args.url,
+                        originAction="",
+                        qualityHint="unknown",
+                        qualityScore=0,
+                        isTemporary=False,
+                        requiresFreshDiscovery=False,
+                        isPlayable=True,
+                        httpStatusCode=m3u_result.status_code,
+                        contentType=m3u_result.content_type,
+                        finalUrl=m3u_result.final_url or args.url
+                    )
+                    result = ParserResult(
+                        success=True,
+                        inputUrl=args.url,
+                        effectiveUrl=args.url,
+                        title="",
+                        candidates=[candidate],
+                        diagnostics=diagnostics,
+                        error=None
+                    )
+                    print_json_result(result)
+                    return
+                else:
+                    diagnostics.append("Playlist parsing failed or no playable streams found.")
+
             diagnostics.append("Input URL looks like a direct audio stream. Validating directly.")
             validator = StreamValidator(timeout=args.timeout, debug=args.debug)
             validation = validator.validate(args.url)

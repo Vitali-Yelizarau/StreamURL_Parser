@@ -7,6 +7,24 @@ from urllib.parse import urlparse, urlunparse, unquote
 from playwright.sync_api import sync_playwright
 
 from stream_parser.models import ParserResult, StreamCandidate
+
+# Когда запускается из PyInstaller exe — браузеры лежат рядом с exe
+# Устанавливаем PLAYWRIGHT_BROWSERS_PATH чтобы Playwright их нашёл
+import sys as _sys
+import os as _os
+if getattr(_sys, 'frozen', False):
+    # Запущен как exe — ищем папку ms-playwright рядом с exe
+    _exe_dir = _os.path.dirname(_sys.executable)
+    _browsers_path = _os.path.join(_exe_dir, 'ms-playwright')
+    if _os.path.isdir(_browsers_path):
+        _os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', _browsers_path)
+    else:
+        # Fallback: стандартный путь Playwright в AppData
+        _pw_home = _os.path.join(
+            _os.environ.get('LOCALAPPDATA', _os.path.expanduser('~')),
+            'ms-playwright'
+        )
+        _os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', _pw_home)
 from stream_parser.stream_validator import StreamValidator
 
 
