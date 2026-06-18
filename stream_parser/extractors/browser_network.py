@@ -1901,6 +1901,40 @@ class BrowserNetworkExtractor:
                         return text;
                     }
 
+                    function isInHeaderOrNav(element) {
+                        let current = element;
+                        let depth = 0;
+
+                        // Walk up at most 8 levels to find header/nav ancestors
+                        while (current && current !== document.body && depth < 8) {
+                            const tagName = current.tagName ? current.tagName.toLowerCase() : '';
+
+                            // HTML5 semantic tags
+                            if (tagName === 'header' || tagName === 'nav' || tagName === 'footer') {
+                                return true;
+                            }
+
+                            const id = (current.id || '').toLowerCase();
+                            const cls = typeof current.className === 'string'
+                                ? current.className.toLowerCase()
+                                : '';
+
+                            // Common header/nav/logo class and id patterns
+                            if (/(^|[^a-z0-9])(header|navbar|topbar|masthead|sitenav|logo|logotype)([^a-z0-9]|$)/.test(id)) {
+                                return true;
+                            }
+
+                            if (/(^|[^a-z0-9])(header|navbar|topbar|masthead|sitenav|logo|logotype)([^a-z0-9]|$)/.test(cls)) {
+                                return true;
+                            }
+
+                            current = current.parentElement;
+                            depth++;
+                        }
+
+                        return false;
+                    }
+
                     function isNavigationAnchor(element, attributeHaystack, textHaystack) {
                         const tagName = element.tagName.toLowerCase();
 
@@ -1985,6 +2019,10 @@ class BrowserNetworkExtractor:
                         const textHasQuality = hasQuality(textHaystack);
 
                         if (!attributeHasAction && !textHasAction && !attributeHasQuality && !textHasQuality) {
+                            continue;
+                        }
+
+                        if (isInHeaderOrNav(element)) {
                             continue;
                         }
 
@@ -3120,3 +3158,4 @@ class BrowserNetworkExtractor:
             result.append(value)
 
         return result
+
