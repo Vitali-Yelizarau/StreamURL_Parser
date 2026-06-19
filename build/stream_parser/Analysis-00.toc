@@ -2201,6 +2201,10 @@
   ('playwright',
    'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\playwright\\__init__.py',
    'PYMODULE'),
+  ('tracemalloc',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\tracemalloc.py',
+   'PYMODULE'),
   ('_py_abc',
    'C:\\Program Files (x86)\\Microsoft Visual '
    'Studio\\Shared\\Python39_64\\lib\\_py_abc.py',
@@ -2208,10 +2212,6 @@
   ('stringprep',
    'C:\\Program Files (x86)\\Microsoft Visual '
    'Studio\\Shared\\Python39_64\\lib\\stringprep.py',
-   'PYMODULE'),
-  ('tracemalloc',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\tracemalloc.py',
    'PYMODULE'),
   ('stream_parser.http_client',
    'D:\\Projects\\New\\StreamURL_Parser\\stream_parser\\http_client.py',
@@ -2837,61 +2837,61 @@
   ('lxml\\builder.cp39-win_amd64.pyd',
    'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\builder.cp39-win_amd64.pyd',
    'EXTENSION'),
-  ('api-ms-win-crt-environment-l1-1-0.dll',
+  ('api-ms-win-crt-locale-l1-1-0.dll',
    'C:\\Program Files\\Microsoft Visual '
-   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-environment-l1-1-0.dll',
-   'BINARY'),
-  ('api-ms-win-crt-math-l1-1-0.dll',
-   'C:\\Program Files\\Microsoft Visual '
-   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-math-l1-1-0.dll',
-   'BINARY'),
-  ('api-ms-win-crt-heap-l1-1-0.dll',
-   'C:\\Program Files\\Microsoft Visual '
-   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-heap-l1-1-0.dll',
-   'BINARY'),
-  ('VCRUNTIME140.dll',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\VCRUNTIME140.dll',
-   'BINARY'),
-  ('api-ms-win-crt-convert-l1-1-0.dll',
-   'C:\\Program Files\\Microsoft Visual '
-   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-convert-l1-1-0.dll',
+   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-locale-l1-1-0.dll',
    'BINARY'),
   ('api-ms-win-crt-filesystem-l1-1-0.dll',
    'C:\\Program Files\\Microsoft Visual '
    'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-filesystem-l1-1-0.dll',
    'BINARY'),
-  ('api-ms-win-crt-stdio-l1-1-0.dll',
+  ('api-ms-win-crt-convert-l1-1-0.dll',
    'C:\\Program Files\\Microsoft Visual '
-   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-stdio-l1-1-0.dll',
-   'BINARY'),
-  ('api-ms-win-crt-runtime-l1-1-0.dll',
-   'C:\\Program Files\\Microsoft Visual '
-   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-runtime-l1-1-0.dll',
+   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-convert-l1-1-0.dll',
    'BINARY'),
   ('api-ms-win-crt-time-l1-1-0.dll',
    'C:\\Program Files\\Microsoft Visual '
    'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-time-l1-1-0.dll',
    'BINARY'),
-  ('api-ms-win-crt-locale-l1-1-0.dll',
+  ('api-ms-win-crt-runtime-l1-1-0.dll',
    'C:\\Program Files\\Microsoft Visual '
-   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-locale-l1-1-0.dll',
+   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-runtime-l1-1-0.dll',
+   'BINARY'),
+  ('api-ms-win-crt-stdio-l1-1-0.dll',
+   'C:\\Program Files\\Microsoft Visual '
+   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-stdio-l1-1-0.dll',
+   'BINARY'),
+  ('VCRUNTIME140.dll',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\VCRUNTIME140.dll',
+   'BINARY'),
+  ('api-ms-win-crt-environment-l1-1-0.dll',
+   'C:\\Program Files\\Microsoft Visual '
+   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-environment-l1-1-0.dll',
+   'BINARY'),
+  ('api-ms-win-crt-heap-l1-1-0.dll',
+   'C:\\Program Files\\Microsoft Visual '
+   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-heap-l1-1-0.dll',
    'BINARY'),
   ('api-ms-win-crt-string-l1-1-0.dll',
    'C:\\Program Files\\Microsoft Visual '
    'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-string-l1-1-0.dll',
    'BINARY'),
+  ('api-ms-win-crt-math-l1-1-0.dll',
+   'C:\\Program Files\\Microsoft Visual '
+   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-math-l1-1-0.dll',
+   'BINARY'),
   ('api-ms-win-crt-utility-l1-1-0.dll',
    'C:\\Program Files\\Microsoft Visual '
    'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-crt-utility-l1-1-0.dll',
    'BINARY'),
-  ('libssl-1_1.dll',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\DLLs\\libssl-1_1.dll',
-   'BINARY'),
   ('libcrypto-1_1.dll',
    'C:\\Program Files (x86)\\Microsoft Visual '
    'Studio\\Shared\\Python39_64\\DLLs\\libcrypto-1_1.dll',
+   'BINARY'),
+  ('libssl-1_1.dll',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\DLLs\\libssl-1_1.dll',
    'BINARY'),
   ('libffi-7.dll',
    'C:\\Program Files (x86)\\Microsoft Visual '
@@ -2901,6 +2901,10 @@
    'C:\\Program Files\\Microsoft Visual '
    'Studio\\18\\Insiders\\Common7\\IDE\\ucrtbase.dll',
    'BINARY'),
+  ('api-ms-win-core-file-l2-1-0.dll',
+   'C:\\Program Files\\Microsoft Visual '
+   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-core-file-l2-1-0.dll',
+   'BINARY'),
   ('api-ms-win-core-processthreads-l1-1-1.dll',
    'C:\\Program Files\\Microsoft Visual '
    'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-core-processthreads-l1-1-1.dll',
@@ -2908,10 +2912,6 @@
   ('api-ms-win-core-file-l1-2-0.dll',
    'C:\\Program Files\\Microsoft Visual '
    'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-core-file-l1-2-0.dll',
-   'BINARY'),
-  ('api-ms-win-core-file-l2-1-0.dll',
-   'C:\\Program Files\\Microsoft Visual '
-   'Studio\\18\\Insiders\\Common7\\IDE\\api-ms-win-core-file-l2-1-0.dll',
    'BINARY'),
   ('api-ms-win-core-timezone-l1-1-0.dll',
    'C:\\Program Files\\Microsoft Visual '
@@ -4151,17 +4151,17 @@
   ('playwright\\sync_api\\_generated.py',
    'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\playwright\\sync_api\\_generated.py',
    'DATA'),
-  ('certifi\\py.typed',
-   'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\certifi\\py.typed',
-   'DATA'),
   ('certifi\\cacert.pem',
    'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\certifi\\cacert.pem',
+   'DATA'),
+  ('certifi\\py.typed',
+   'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\certifi\\py.typed',
    'DATA'),
   ('lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_dsdl_include.xsl',
    'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_dsdl_include.xsl',
    'DATA'),
-  ('lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_schematron_skeleton_for_xslt1.xsl',
-   'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_schematron_skeleton_for_xslt1.xsl',
+  ('lxml\\isoschematron\\resources\\xsl\\RNG2Schtrn.xsl',
+   'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\xsl\\RNG2Schtrn.xsl',
    'DATA'),
   ('lxml\\isoschematron\\resources\\rng\\iso-schematron.rng',
    'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\rng\\iso-schematron.rng',
@@ -4169,43 +4169,43 @@
   ('lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_svrl_for_xslt1.xsl',
    'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_svrl_for_xslt1.xsl',
    'DATA'),
-  ('lxml\\isoschematron\\resources\\xsl\\XSD2Schtrn.xsl',
-   'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\xsl\\XSD2Schtrn.xsl',
-   'DATA'),
-  ('lxml\\isoschematron\\resources\\xsl\\RNG2Schtrn.xsl',
-   'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\xsl\\RNG2Schtrn.xsl',
-   'DATA'),
-  ('lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_abstract_expand.xsl',
-   'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_abstract_expand.xsl',
+  ('lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\readme.txt',
+   'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\readme.txt',
    'DATA'),
   ('lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_schematron_message.xsl',
    'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_schematron_message.xsl',
    'DATA'),
-  ('lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\readme.txt',
-   'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\readme.txt',
+  ('lxml\\isoschematron\\resources\\xsl\\XSD2Schtrn.xsl',
+   'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\xsl\\XSD2Schtrn.xsl',
+   'DATA'),
+  ('lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_abstract_expand.xsl',
+   'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_abstract_expand.xsl',
+   'DATA'),
+  ('lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_schematron_skeleton_for_xslt1.xsl',
+   'D:\\Projects\\New\\StreamURL_Parser\\.venv\\lib\\site-packages\\lxml\\isoschematron\\resources\\xsl\\iso-schematron-xslt1\\iso_schematron_skeleton_for_xslt1.xsl',
    'DATA'),
   ('base_library.zip',
    'D:\\Projects\\New\\StreamURL_Parser\\build\\stream_parser\\base_library.zip',
    'DATA')],
- [('sre_parse',
+ [('linecache',
    'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\sre_parse.py',
-   'PYMODULE'),
-  ('ntpath',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\ntpath.py',
-   'PYMODULE'),
-  ('_weakrefset',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\_weakrefset.py',
+   'Studio\\Shared\\Python39_64\\lib\\linecache.py',
    'PYMODULE'),
   ('locale',
    'C:\\Program Files (x86)\\Microsoft Visual '
    'Studio\\Shared\\Python39_64\\lib\\locale.py',
    'PYMODULE'),
-  ('codecs',
+  ('stat',
    'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\codecs.py',
+   'Studio\\Shared\\Python39_64\\lib\\stat.py',
+   'PYMODULE'),
+  ('_bootlocale',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\_bootlocale.py',
+   'PYMODULE'),
+  ('sre_parse',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\sre_parse.py',
    'PYMODULE'),
   ('re',
    'C:\\Program Files (x86)\\Microsoft Visual '
@@ -4215,21 +4215,77 @@
    'C:\\Program Files (x86)\\Microsoft Visual '
    'Studio\\Shared\\Python39_64\\lib\\copyreg.py',
    'PYMODULE'),
-  ('os',
+  ('ntpath',
    'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\os.py',
+   'Studio\\Shared\\Python39_64\\lib\\ntpath.py',
+   'PYMODULE'),
+  ('codecs',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\codecs.py',
+   'PYMODULE'),
+  ('collections.abc',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\collections\\abc.py',
+   'PYMODULE'),
+  ('collections',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\collections\\__init__.py',
+   'PYMODULE'),
+  ('keyword',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\keyword.py',
+   'PYMODULE'),
+  ('_weakrefset',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\_weakrefset.py',
    'PYMODULE'),
   ('heapq',
    'C:\\Program Files (x86)\\Microsoft Visual '
    'Studio\\Shared\\Python39_64\\lib\\heapq.py',
    'PYMODULE'),
-  ('_bootlocale',
+  ('genericpath',
    'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\_bootlocale.py',
+   'Studio\\Shared\\Python39_64\\lib\\genericpath.py',
+   'PYMODULE'),
+  ('types',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\types.py',
+   'PYMODULE'),
+  ('sre_compile',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\sre_compile.py',
+   'PYMODULE'),
+  ('io',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\io.py',
+   'PYMODULE'),
+  ('sre_constants',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\sre_constants.py',
+   'PYMODULE'),
+  ('reprlib',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\reprlib.py',
+   'PYMODULE'),
+  ('_collections_abc',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\_collections_abc.py',
+   'PYMODULE'),
+  ('warnings',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\warnings.py',
    'PYMODULE'),
   ('abc',
    'C:\\Program Files (x86)\\Microsoft Visual '
    'Studio\\Shared\\Python39_64\\lib\\abc.py',
+   'PYMODULE'),
+  ('weakref',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\weakref.py',
+   'PYMODULE'),
+  ('posixpath',
+   'C:\\Program Files (x86)\\Microsoft Visual '
+   'Studio\\Shared\\Python39_64\\lib\\posixpath.py',
    'PYMODULE'),
   ('encodings.zlib_codec',
    'C:\\Program Files (x86)\\Microsoft Visual '
@@ -4719,77 +4775,21 @@
    'C:\\Program Files (x86)\\Microsoft Visual '
    'Studio\\Shared\\Python39_64\\lib\\encodings\\__init__.py',
    'PYMODULE'),
-  ('collections.abc',
+  ('functools',
    'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\collections\\abc.py',
-   'PYMODULE'),
-  ('collections',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\collections\\__init__.py',
+   'Studio\\Shared\\Python39_64\\lib\\functools.py',
    'PYMODULE'),
   ('enum',
    'C:\\Program Files (x86)\\Microsoft Visual '
    'Studio\\Shared\\Python39_64\\lib\\enum.py',
    'PYMODULE'),
-  ('posixpath',
+  ('os',
    'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\posixpath.py',
-   'PYMODULE'),
-  ('keyword',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\keyword.py',
-   'PYMODULE'),
-  ('sre_constants',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\sre_constants.py',
-   'PYMODULE'),
-  ('genericpath',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\genericpath.py',
-   'PYMODULE'),
-  ('functools',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\functools.py',
-   'PYMODULE'),
-  ('weakref',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\weakref.py',
-   'PYMODULE'),
-  ('warnings',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\warnings.py',
-   'PYMODULE'),
-  ('linecache',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\linecache.py',
-   'PYMODULE'),
-  ('_collections_abc',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\_collections_abc.py',
-   'PYMODULE'),
-  ('stat',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\stat.py',
-   'PYMODULE'),
-  ('io',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\io.py',
-   'PYMODULE'),
-  ('sre_compile',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\sre_compile.py',
-   'PYMODULE'),
-  ('reprlib',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\reprlib.py',
+   'Studio\\Shared\\Python39_64\\lib\\os.py',
    'PYMODULE'),
   ('operator',
    'C:\\Program Files (x86)\\Microsoft Visual '
    'Studio\\Shared\\Python39_64\\lib\\operator.py',
-   'PYMODULE'),
-  ('types',
-   'C:\\Program Files (x86)\\Microsoft Visual '
-   'Studio\\Shared\\Python39_64\\lib\\types.py',
    'PYMODULE'),
   ('traceback',
    'C:\\Program Files (x86)\\Microsoft Visual '

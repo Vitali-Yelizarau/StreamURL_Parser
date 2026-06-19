@@ -1352,13 +1352,21 @@ class BrowserNetworkExtractor:
 
     def _try_dismiss_consent_overlay(self, page, diagnostics: List[str]):
         """
-        Пытается закрыть overlay с consent/cookie/GDPR который может блокировать
-        кнопки плеера. Ищет типичные кнопки принятия и кликает первую найденную.
+        Tries to close consent/cookie/GDPR overlays that may block player
+        buttons. Two strategies are used in order:
+          1. CSS selectors for known CMP frameworks (Quantcast, Didomi,
+             Funding Choices, IAB TCF, etc.).
+          2. Text-based fallback that scans buttons/links for accept-style
+             words in many languages and clicks the first match,
+             while skipping reject/decline buttons.
         """
         try:
             clicked = page.evaluate(
                 """
                 () => {
+                    // ----------------------------------------------------------------
+                    // Strategy 1 — CSS selectors for known CMP frameworks
+                    // ----------------------------------------------------------------
                     const consentSelectors = [
                         '[class*="consent"] button[class*="accept" i]',
                         '[class*="consent"] button[class*="agree" i]',
@@ -1375,7 +1383,14 @@ class BrowserNetworkExtractor:
                         '#didomi-notice-agree-button',
                         '.didomi-continue-without-agreeing',
                         '[class*="gdpr"] button',
-                        '.qc-cmp2-summary-buttons button:first-child'
+
+                        // Quantcast Choice CMP (used by AdMind and others)
+                        '.qc-cmp2-summary-buttons button[mode="primary"]',
+                        '.qc-cmp2-footer button[mode="primary"]',
+
+                        // Generic primary action buttons in dialogs
+                        '[role="dialog"] button[mode="primary"]',
+                        '[class*="cmp"] button[mode="primary"]'
                     ];
 
                     for (const selector of consentSelectors) {
@@ -1383,9 +1398,192 @@ class BrowserNetworkExtractor:
                             const el = document.querySelector(selector);
                             if (el) {
                                 el.click();
-                                return selector;
+                                return 'selector: ' + selector;
                             }
                         } catch (e) {}
+                    }
+
+                    // ----------------------------------------------------------------
+                    // Strategy 2 — text-based fallback for non-English CMPs
+                    // ----------------------------------------------------------------
+                    const acceptTexts = [
+                        // English
+                        'accept', 'accept all', 'agree', 'i agree', 'allow', 'allow all',
+                        'continue', 'ok', 'okay', 'got it', 'understood', 'confirm', 'yes',
+
+                        // Spanish
+                        'acepto', 'aceptar', 'aceptar todo', 'acepto y continúo', 'estoy de acuerdo',
+                        'permitir', 'entendido', 'continuar', 'consentir',
+
+                        // German
+                        'akzeptieren', 'alle akzeptieren', 'zustimmen', 'einverstanden',
+                        'ich stimme zu', 'erlauben', 'verstanden', 'fortfahren', 'weiter',
+
+                        // French
+                        'accepter', 'tout accepter', 'autoriser', 'autoriser tout',
+                        'continuer', "j'accepte", "d'accord", 'compris',
+
+                        // Italian
+                        'accetto', 'accetta', 'accetta tutto', 'acconsento',
+                        'consenti', 'consenti tutto', 'permetti', 'ho capito', 'continua',
+
+                        // Portuguese
+                        'aceito', 'aceitar', 'aceitar tudo', 'aceitar todos', 'concordo',
+                        'permitir', 'continuar', 'entendi', 'autorizar',
+
+                        // Dutch
+                        'accepteren', 'alles accepteren', 'akkoord', 'toestaan',
+                        'begrepen', 'doorgaan', 'ik ga akkoord',
+
+                        // Polish
+                        'akceptuję', 'akceptuj', 'zaakceptuj', 'zaakceptuj wszystko',
+                        'zgadzam się', 'zgoda', 'zezwól', 'kontynuuj', 'rozumiem',
+
+                        // Ukrainian
+                        'прийняти', 'прийняти все', 'погоджуюсь', 'погоджуюся',
+                        'згоден', 'згодна', 'дозволити', 'продовжити', 'зрозуміло',
+
+                        // Russian
+                        'принять', 'принять все', 'согласен', 'согласна', 'я согласен',
+                        'разрешить', 'продолжить', 'понятно', 'ок',
+
+                        // Belarusian
+                        'прыняць', 'згаджаюся', 'згодны', 'дазволіць', 'працягнуць',
+
+                        // Czech
+                        'přijmout', 'přijmout vše', 'souhlasím', 'povolit',
+                        'rozumím', 'pokračovat',
+
+                        // Slovak
+                        'prijať', 'prijať všetko', 'súhlasím', 'povoliť',
+                        'rozumiem', 'pokračovať',
+
+                        // Slovenian
+                        'sprejmem', 'sprejeti', 'sprejmi vse', 'strinjam se',
+                        'dovoli', 'razumem', 'nadaljuj',
+
+                        // Croatian / Serbian (Latin)
+                        'prihvaćam', 'prihvati', 'prihvati sve', 'slažem se',
+                        'dopusti', 'razumijem', 'nastavi',
+
+                        // Serbian (Cyrillic)
+                        'прихватам', 'слажем се', 'разумем',
+
+                        // Bulgarian
+                        'приемам', 'приемете', 'съгласен съм', 'разреши',
+                        'разбрах', 'продължи',
+
+                        // Romanian
+                        'accept', 'acceptă', 'acceptă tot', 'sunt de acord',
+                        'permite', 'am înțeles', 'continuă',
+
+                        // Hungarian
+                        'elfogadom', 'elfogad', 'mindet elfogadom', 'egyetértek',
+                        'engedélyez', 'értem', 'tovább',
+
+                        // Greek
+                        'αποδοχή', 'αποδοχή όλων', 'συμφωνώ', 'αποδέχομαι',
+                        'επιτρέπω', 'κατάλαβα', 'συνέχεια',
+
+                        // Turkish
+                        'kabul et', 'kabul ediyorum', 'hepsini kabul et', 'onaylıyorum',
+                        'izin ver', 'anladım', 'devam et',
+
+                        // Swedish
+                        'acceptera', 'acceptera alla', 'godkänn', 'godkänn alla',
+                        'jag godkänner', 'tillåt', 'fortsätt',
+
+                        // Norwegian
+                        'godta', 'godta alle', 'jeg godtar', 'tillat', 'fortsett',
+
+                        // Danish
+                        'accepter', 'accepter alle', 'jeg accepterer', 'tillad',
+                        'forstået', 'fortsæt',
+
+                        // Finnish
+                        'hyväksy', 'hyväksy kaikki', 'hyväksyn', 'salli',
+                        'ymmärrän', 'jatka',
+
+                        // Estonian
+                        'nõustun', 'nõustu', 'nõustu kõigega', 'luba', 'jätka',
+
+                        // Latvian
+                        'piekrītu', 'piekrist', 'pieņemt visu', 'atļaut', 'turpināt',
+
+                        // Lithuanian
+                        'sutinku', 'sutikti', 'priimti viską', 'leisti', 'tęsti',
+
+                        // Arabic
+                        'موافق', 'أوافق', 'قبول', 'قبول الكل', 'السماح',
+                        'فهمت', 'متابعة', 'استمرار',
+
+                        // Hebrew
+                        'אני מסכים', 'אישור', 'הסכמה', 'אפשר',
+                        'הבנתי', 'להמשיך',
+
+                        // Japanese
+                        '同意する', '同意します', 'すべて同意', '承認', '許可',
+                        '了解', '続ける', 'はい',
+
+                        // Chinese (Simplified)
+                        '同意', '全部同意', '我同意', '接受', '接受全部',
+                        '允许', '了解', '继续', '确认', '确定',
+
+                        // Chinese (Traditional)
+                        '允許', '繼續', '確認', '確定',
+
+                        // Korean
+                        '동의', '모두 동의', '동의합니다', '수락', '모두 수락',
+                        '허용', '이해함', '계속', '확인',
+
+                        // Vietnamese
+                        'chấp nhận', 'đồng ý', 'tôi đồng ý', 'cho phép',
+                        'đã hiểu', 'tiếp tục',
+
+                        // Thai
+                        'ยอมรับ', 'ยอมรับทั้งหมด', 'ฉันยอมรับ', 'ตกลง',
+                        'อนุญาต', 'เข้าใจแล้ว', 'ดำเนินการต่อ',
+
+                        // Indonesian / Malay
+                        'terima', 'setuju', 'saya setuju', 'izinkan',
+                        'mengerti', 'lanjutkan',
+
+                        // Hindi
+                        'स्वीकार करें', 'सहमत हूं', 'मैं सहमत हूं', 'अनुमति दें',
+                        'समझ गया', 'जारी रखें'
+                    ];
+
+                    // Regex of "reject"-style words to skip, multi-language
+                    const rejectRegex = /reject|decline|disagree|deny|no thanks|opt[\\s-]?out|manage|customize|customise|settings|preferences|rechazar|denegar|no acepto|ablehnen|ich lehne ab|refuser|tout refuser|rifiuta|non accetto|rejeitar|recusar|weiger|nie zgadzam|відхилити|не згоден|відмовити|отклонить|не согласен|odmítnout|odmítam|odmítnúť|odbij|odbiti|απόρριψη|reddet|kabul etmiyorum|avvis|afvis|hylkää|keelduma|noraidīt|atsisakyti|拒否|拒绝|拒絕|거부|từ chối|ปฏิเสธ|tolak|अस्वीकार|رفض/i;
+
+                    const candidates = Array.from(document.querySelectorAll(
+                        'button, [role="button"], a, input[type="button"], input[type="submit"]'
+                    ));
+
+                    for (const btn of candidates) {
+                        // Skip invisible elements
+                        const rect = btn.getBoundingClientRect();
+                        if (rect.width === 0 || rect.height === 0) continue;
+
+                        const style = window.getComputedStyle(btn);
+                        if (style.display === 'none' || style.visibility === 'hidden') continue;
+
+                        const text = (btn.textContent || '').trim().toLowerCase();
+                        if (!text || text.length > 80) continue;
+
+                        // Skip reject/decline/settings buttons
+                        if (rejectRegex.test(text)) continue;
+
+                        // Match accept-style text exactly or as a substring
+                        for (const accept of acceptTexts) {
+                            const acceptLower = accept.toLowerCase();
+                            if (text === acceptLower || text.includes(acceptLower)) {
+                                try {
+                                    btn.click();
+                                    return 'text-match: ' + text.slice(0, 40);
+                                } catch (e) {}
+                            }
+                        }
                     }
 
                     return null;
@@ -1762,7 +1960,7 @@ class BrowserNetworkExtractor:
                 () => {
                     const result = [];
 
-                    const actionRegex = /(^|[^a-zа-яёіїєґ0-9])(play|listen|start|слухати|слушать|слухай|onair|on-air)([^a-zа-яёіїєґ0-9]|$)/i;
+                    const actionRegex = /(^|[^a-zа-яёіїєґ0-9])(play|listen|start|стрим|stream|onair|on-air|now-playing|слухати|слухай|слушать|слушай|играть|играй|включить|reproducir|reproduce|escuchar|escucha|en-vivo|envivo|en-directo|abspielen|hören|hoeren|wiedergabe|jouer|ecouter|écouter|écoute|en-direct|ascolta|riproduci|in-diretta|ouvir|escutar|ao-vivo|odsluchaj|sluchaj|na-żywo|na-zywo|slušati|slušaj|uživo|poslouchat|poslouchám|naživo|poslúchať|na-živo|akouste|akoute|απευθείας|dinle|canlı|spela|lyssna|lyssnar|kuuntele|suorana|spil|lyt|live-radio|live-stream|tinhle|nghe|fáradj|hallgasd|live|trực-tiếp|播放|聽|听|재생|들기|聞く|聴く|재생하기)([^a-zа-яёіїєґ0-9]|$)/i;
                     const qualityRegex = /(^|[^a-z0-9])(hd|hq|high|quality|definition|bitrate|kbps|128|192|256|320)([^a-z0-9]|$)/i;
 
                     const negativeWords = [
@@ -1853,7 +2051,7 @@ class BrowserNetworkExtractor:
                     function isInteractive(element) {
                         const tagName = element.tagName.toLowerCase();
                         const id = (element.id || '').toLowerCase();
-                        const cls = (element.className || '').toLowerCase();
+                        const cls = (typeof element.className === 'string' ? element.className : '').toLowerCase();
 
                         return tagName === 'button'
                             || tagName === 'a'
