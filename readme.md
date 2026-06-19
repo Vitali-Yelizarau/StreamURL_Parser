@@ -224,7 +224,6 @@ The service:
 ---
 
 ## Known Limitations
-
 - Sites that serve stream URLs exclusively via dynamically generated JS (e.g. computed
   from an API response at runtime) may not be parseable without site-specific logic.
 - Some Icecast/Shoutcast servers respond with `ICY 200 OK` instead of standard HTTP —
@@ -233,3 +232,49 @@ The service:
   Static extraction completes in under 5 seconds for most stations.
 - M3U/PLS playlists are downloaded and parsed automatically, including those served
   with `application/octet-stream` content type.
+- **Sites gated by a cookie consent overlay (CMP):** stations behind a "Accept cookies"
+  popup may not start the player until consent is granted. Since each CMP has a custom
+  UI, the parser cannot reliably click them. Examples include parts of `radio.de` /
+  `radio.net` and similar aggregators built on Next.js. If a station from such a
+  source fails to parse, see the manual workflow below.
+- **SoCast-based stations** (`*.thezone.fm`, other Pattison/SoCast affiliates):
+  the stream URL is fetched via an authenticated API call (`/api/v1/music/streamAction`)
+  with session-bound parameters. These cannot be discovered statically and are
+  treated as a known unsupported case.
+- **Sites with dynamic JS-generated Play buttons** (e.g. `jungletrain.net`): the
+  Play button is rendered after JS execution and points to a proxy URL that VLC
+  may not accept. The underlying direct stream usually works — see the manual
+  workflow below.
+
+## Finding a Stream URL Manually
+
+If the parser cannot detect a stream from a page URL, you can usually find it
+yourself in a couple of minutes. Note that the **Stream URL is not the same as
+the page URL** — the page URL is the HTML page you visit in the browser
+(e.g. `https://example.com/listen`), while the Stream URL is the direct
+audio endpoint that VLC, foobar2000, or any media player can open
+(e.g. `https://stream.example.com/live.mp3` or `https://stream.example.com:8000/;`).
+
+**Step-by-step:**
+
+1. Open the radio station's page in Chrome, Edge, or Firefox.
+2. Open DevTools (F12 or Ctrl+Shift+I) and switch to the **Network** tab.
+3. Click the **Media** filter (or **All** if Media shows nothing).
+4. Tick **Preserve log** so requests survive page reloads.
+5. Click the station's Play button.
+6. Look for a new entry that is either a long-running request, or one whose
+   content type is `audio/mpeg`, `audio/aac`, `audio/aacp`, `application/ogg`,
+   or that ends with `.mp3`, `.aac`, `.m3u8`, or has no extension but a
+   non-standard port like `:8000`, `:8443`.
+7. Right-click that entry → **Copy** → **Copy URL** (or **Copy link address**).
+8. Paste the URL into the **Stream URL** field of the Add Radio Station window.
+   You can leave **Radio page URL** filled in too — both fields can coexist.
+
+**Tips:**
+- If the first request returns HTTP `302 Found`, follow it — the redirect
+  target is often the real stream and is more stable.
+- Prefer the shortest URL form. Trailing tokens like
+  `?session=abc123&token=...` are usually optional and may expire.
+- Some Icecast servers require a trailing `/;`, `/stream`, `/live`, or `/1`
+  to actually serve audio. If the URL plays in a browser but not in the
+  player, try appending one of these suffixes.
