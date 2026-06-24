@@ -38,11 +38,15 @@ Results are returned as JSON on stdout. Debug logs go to stderr.
 # Create virtual environment
 python -m venv .venv
 
-# Install dependencies
-.\.venv\Scripts\pip install -r requirements.txt
+# Install dependencies. Call pip via `python -m` rather than the
+# .venv\Scripts\pip.exe wrapper: the wrapper hard-codes the venv's original
+# absolute path and stops working if the project folder is ever moved.
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 
-# Install Chromium for Playwright
-.\.venv\Scripts\playwright install chromium
+# Install Chromium for Playwright (for running from source / dev mode).
+# For a release build, install into a local browsers\ folder instead — see
+# "Building the Executable".
+.venv\Scripts\python.exe -m playwright install chromium
 ```
 
 ### Dependencies (`requirements.txt`)
@@ -54,6 +58,13 @@ python -m venv .venv
 | `lxml` | Fast HTML/XML parser backend for BeautifulSoup |
 | `playwright` | Headless Chromium browser automation |
 | `greenlet` | Required by Playwright's sync API |
+| `pyinstaller` | Packaging the standalone `.exe` (build only) |
+
+> **Pin the Playwright version** (e.g. `playwright==1.60.0`). The Chromium browser
+> revision is tied to the exact Playwright version. If pip silently upgrades
+> Playwright, the browser bundled in `browsers\` no longer matches and the exe
+> fails at `Launching Chromium`. Let Playwright pull its own matching `greenlet`
+> (it pins a compatible version automatically).
 
 ---
 
@@ -161,9 +172,21 @@ the parser will validate it without running the extractors:
 
 ## Building the Executable
 
-The parser can be packaged into a standalone `.exe` using PyInstaller.
-The result is a folder (`dist/stream_parser/`) containing the executable
-and all required DLLs.
+The parser can be packaged into a standalone `.exe` using PyInstaller. The result
+is a folder (`dist\stream_parser\`) containing the executable, its dependencies,
+and a bundled Chromium, so it runs on machines without Python or Playwright
+installed.
+
+> **Build and browser must come from the same venv / Playwright version.** The
+> Chromium revision is pinned to the installed Playwright version. If you build
+> the exe with one Playwright version but bundle a browser from another, the exe
+> fails at `Launching Chromium`. Keep `playwright` pinned in `requirements.txt`
+> and run all steps below from the same environment.
+
+When running as a frozen build, `main.py` sets `PLAYWRIGHT_BROWSERS_PATH` to a
+`browsers\` folder **next to the exe**, so the release looks for its browser
+there instead of the per-user profile (`%LOCALAPPDATA%\ms-playwright`). All you
+have to do is put the browser there.
 
 ### 1. Clean Python cache (recommended before each build)
 
@@ -172,40 +195,73 @@ Get-ChildItem -Recurse -Filter "__pycache__" | Remove-Item -Recurse -Force
 Get-ChildItem -Recurse -Filter "*.pyc" | Remove-Item -Force
 ```
 
-### 2. Build
+### 2. Install Chromium into a local `browsers\` folder
+
+Point `PLAYWRIGHT_BROWSERS_PATH` at a `browsers\` folder in the project root and
+install there (not into the profile), so the browser can be shipped with the build:
 
 ```powershell
-.\.venv\Scripts\pyinstaller --onedir --name stream_parser --noconfirm --collect-all playwright stream_parser\main.py
+$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\browsers"
+.venv\Scripts\python.exe -m playwright install chromium
 ```
 
-### 3. Bundle Chromium
+Keep this terminal open — `PLAYWRIGHT_BROWSERS_PATH` lives only in the current
+session, and it is also needed by the next step so PyInstaller's `--collect-all`
+does not pull the browser from the profile instead.
 
-Playwright's Chromium browser must be copied next to the executable so it works
-without a Python installation on the target machine:
+### 3. Build
+
+Invoke PyInstaller via `python -m`. The `pyinstaller.exe` wrapper hard-codes the
+venv path and fails with "Unable to create process" if the project folder was
+ever moved; `python -m PyInstaller` avoids that.
 
 ```powershell
-# Find installed Chromium version
-Get-ChildItem "$env:LOCALAPPDATA\ms-playwright" | Select-Object Name
-
-# Copy it into the dist folder (replace chromium-XXXX with your actual folder name)
-Copy-Item "$env:LOCALAPPDATA\ms-playwright\chromium-1148" -Destination "dist\stream_parser\ms-playwright\chromium-1148" -Recurse
+.venv\Scripts\python.exe -m PyInstaller --onedir --name stream_parser --noconfirm --collect-all playwright stream_parser\main.py
 ```
 
-### 4. Final distribution structure
+### 4. Bundle Chromium into the build
+
+PyInstaller packages the code and the Playwright driver, but not the browser
+binary — copy the `browsers\` folder next to the exe:
+
+```powershell
+Copy-Item -Recurse -Force browsers dist\stream_parser\browsers
+```
+
+### 5. Final distribution structure
+
+The parser runs headless, so the bundled browser is the lightweight
+`chromium_headless_shell-*` (the folder name carries the revision number tied to
+your Playwright version):
 
 ```
 dist\stream_parser\
     stream_parser.exe
-    ms-playwright\
-        chromium-1148\
+    browsers\
+        chromium_headless_shell-XXXX\
             chrome-win\
-                chrome.exe
+                headless_shell.exe
                 ...
     _internal\
         ...
 ```
 
 Copy the entire `dist\stream_parser\` folder to your application directory.
+
+### 6. Verify the build is self-contained
+
+Run the built exe **directly** (not through your venv) to confirm it finds the
+bundled browser rather than your profile:
+
+```powershell
+dist\stream_parser\stream_parser.exe --url "https://play.tavr.media/radioroks/hardnheavy/" --timeout 60 --debug
+```
+
+If you see `[BROWSER] Launching Chromium` followed by stream candidates, the
+bundle is self-contained and ready to distribute. A
+`[BROWSER] Launch failed: Executable doesn't exist...` means the `browsers\`
+folder is missing next to the exe, or its revision does not match the bundled
+Playwright version (rebuild with matching versions, step 2 onward).
 
 ---
 
@@ -232,11 +288,18 @@ The service:
   Static extraction completes in under 5 seconds for most stations.
 - M3U/PLS playlists are downloaded and parsed automatically, including those served
   with `application/octet-stream` content type.
+- **HD/quality-toggle players** (e.g. tavr.media): when a station autoplays a
+  standard-definition stream and exposes a separate "play in HD" switch, the
+  parser clicks that switch to also capture the HD stream, returning both
+  candidates (HD first by quality score). Because the HD control on ad-heavy
+  players can render late, HD capture is timing-dependent and may occasionally be
+  missed on a given run — re-running usually picks it up.
 - **Sites gated by a cookie consent overlay (CMP):** stations behind a "Accept cookies"
-  popup may not start the player until consent is granted. Since each CMP has a custom
-  UI, the parser cannot reliably click them. Examples include parts of `radio.de` /
-  `radio.net` and similar aggregators built on Next.js. If a station from such a
-  source fails to parse, see the manual workflow below.
+  popup may not start the player until consent is granted. The parser tries known
+  CMP frameworks and a multilingual accept-button fallback, but bespoke CMPs may
+  still block playback. Examples include parts of `radio.de` / `radio.net` and
+  similar aggregators built on Next.js. If a station from such a source fails to
+  parse, see the manual workflow below.
 - **SoCast-based stations** (`*.thezone.fm`, other Pattison/SoCast affiliates):
   the stream URL is fetched via an authenticated API call (`/api/v1/music/streamAction`)
   with session-bound parameters. These cannot be discovered statically and are
