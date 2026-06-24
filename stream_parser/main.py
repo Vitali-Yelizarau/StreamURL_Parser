@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 import traceback
 from urllib.parse import urlparse
@@ -9,18 +10,43 @@ from stream_parser.extractors.generic_static import GenericStaticExtractor
 from stream_parser.extractors.browser_network import BrowserNetworkExtractor
 from stream_parser.stream_validator import StreamValidator
 
+
+def _base_dir() -> str:
+    """
+    Directory where the running program actually lives.
+    For a PyInstaller build this is the folder next to stream_parser.exe,
+    NOT the temporary _MEIPASS unpack dir — the browser must sit in a
+    permanent folder beside the exe, not in a per-run temp directory.
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+# Make Playwright look for browsers in a "browsers" folder next to the exe
+# instead of the per-user profile (%LOCALAPPDATA%\ms-playwright). This makes
+# the release self-contained: copy the folder and it runs — no `playwright
+# install` needed on the target machine.
+# Only forced for the frozen build, so local dev keeps using the normal
+# profile-installed browsers. An explicitly set PLAYWRIGHT_BROWSERS_PATH is
+# respected and never overwritten.
+if getattr(sys, "frozen", False) and "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = os.path.join(_base_dir(), "browsers")
+
+
 def print_json_result(result: ParserResult):
     import sys
     output = json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
-    # Принудительно пишем в UTF-8 — важно для exe на Windows с cp1251 консолью
+    # Force UTF-8 output — important for the exe on Windows with a cp1251 console
     sys.stdout.buffer.write((output + "\n").encode("utf-8"))
     sys.stdout.buffer.flush()
 
+
 def _is_direct_stream_url(url: str) -> bool:
     """
-    Проверяет что URL сам по себе является прямым аудио-потоком,
-    а не страницей с плеером. Признаки: аудио-расширение или
-    stream-like путь на нестандартном порту.
+    Checks whether the URL itself is a direct audio stream rather than a
+    page with a player. Signals: an audio file extension, or a stream-like
+    path on a non-standard port (typical Icecast/Shoutcast).
     """
     if not url:
         return False
@@ -37,7 +63,7 @@ def _is_direct_stream_url(url: str) -> bool:
     if any(path.endswith(ext) for ext in audio_extensions):
         return True
 
-    # Нестандартный порт + stream-like путь (типичный Icecast/Shoutcast)
+    # Non-standard port + stream-like path (typical Icecast/Shoutcast)
     port = parsed.port
     if port and port not in (80, 443, 8080, 8443):
         stream_tokens = ("/stream", "/live", "/audio", "/listen",
@@ -46,6 +72,7 @@ def _is_direct_stream_url(url: str) -> bool:
             return True
 
     return False
+
 
 def main():
     parser = argparse.ArgumentParser(description="Universal stream URL parser for RadioApp.")
@@ -57,9 +84,9 @@ def main():
     diagnostics = []
 
     try:
-        # Прямая ссылка на аудио-поток — валидируем без запуска экстракторов
+        # Direct audio stream link — validate without running the extractors
         if _is_direct_stream_url(args.url):
-            # M3U/PLS плейлист — парсим содержимое вместо прямой валидации
+            # M3U/PLS playlist — parse the contents instead of validating directly
             parsed_input = urlparse(args.url.lower())
             is_playlist = any(parsed_input.path.endswith(ext)
                               for ext in (".m3u", ".m3u8", ".pls", ".xspf"))
@@ -189,6 +216,7 @@ def main():
         result = ParserResult(success=False, inputUrl=args.url, candidates=[], diagnostics=diagnostics, error=str(ex))
         print_json_result(result)
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

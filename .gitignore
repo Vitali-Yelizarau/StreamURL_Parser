@@ -3,6 +3,25 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+
+.venv/
+venv/
+env/
+
+dist/
+build/
+*.spec
+
+browsers/
+
+__pycache__/
+*.pyc
+
+.idea/
+.vscode/
+
+*.log
+
 # User-specific files
 *.rsuser
 *.suo

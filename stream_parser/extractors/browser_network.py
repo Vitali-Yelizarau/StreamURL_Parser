@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sys
 from typing import List, Set
@@ -7,24 +8,6 @@ from urllib.parse import urlparse, urlunparse, unquote
 from playwright.sync_api import sync_playwright
 
 from stream_parser.models import ParserResult, StreamCandidate
-
-# Когда запускается из PyInstaller exe — браузеры лежат рядом с exe
-# Устанавливаем PLAYWRIGHT_BROWSERS_PATH чтобы Playwright их нашёл
-import sys as _sys
-import os as _os
-if getattr(_sys, 'frozen', False):
-    # Запущен как exe — ищем папку ms-playwright рядом с exe
-    _exe_dir = _os.path.dirname(_sys.executable)
-    _browsers_path = _os.path.join(_exe_dir, 'ms-playwright')
-    if _os.path.isdir(_browsers_path):
-        _os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', _browsers_path)
-    else:
-        # Fallback: стандартный путь Playwright в AppData
-        _pw_home = _os.path.join(
-            _os.environ.get('LOCALAPPDATA', _os.path.expanduser('~')),
-            'ms-playwright'
-        )
-        _os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', _pw_home)
 from stream_parser.stream_validator import StreamValidator
 
 
@@ -49,7 +32,7 @@ class BrowserNetworkExtractor:
     MAX_TEXT_BODY_BYTES = 1000000
     MAX_HOOK_TEXT_CHARS = 900000
     MAX_CLICK_CANDIDATES = 14
-    CLICK_ROUNDS = 2
+    CLICK_ROUNDS = 3
 
     def __init__(self, timeout: int = 15, debug: bool = False):
         self.timeout = timeout
@@ -90,7 +73,36 @@ class BrowserNetworkExtractor:
             with sync_playwright() as playwright:
                 self.log("[BROWSER] Launching Chromium")
 
-                browser = playwright.chromium.launch(headless=True)
+                try:
+                    browser = playwright.chromium.launch(headless=True)
+                except Exception as launch_ex:
+                    # Browser failed to start (missing or version-mismatched
+                    # Chromium binary, blocked by AV, etc.). Report this as a
+                    # distinct, explicit failure instead of letting it collapse
+                    # into a generic "no playable candidates" result, so the real
+                    # cause is visible in the log — for us and for end users.
+                    browsers_path = os.environ.get(
+                        "PLAYWRIGHT_BROWSERS_PATH",
+                        "(default per-user ms-playwright location)"
+                    )
+                    self.log(
+                        f"[BROWSER] Launch failed: {type(launch_ex).__name__}: {launch_ex}"
+                    )
+                    diagnostics.append(
+                        f"[BROWSER] Launch failed: {type(launch_ex).__name__}: {launch_ex}"
+                    )
+                    diagnostics.append(
+                        f"Playwright browser search path: {browsers_path}"
+                    )
+                    return ParserResult(
+                        success=False,
+                        inputUrl=url,
+                        effectiveUrl=url,
+                        title="",
+                        candidates=[],
+                        diagnostics=diagnostics,
+                        error=f"Chromium failed to launch: {type(launch_ex).__name__}: {launch_ex}"
+                    )
 
                 context = browser.new_context(
                     user_agent=(
@@ -134,12 +146,12 @@ class BrowserNetworkExtractor:
                         f"Browser goto warning: {type(ex).__name__}: {ex}"
                     )
 
-                # Увеличенное ожидание — сайт рендерит плеер через JS,
-                # и появление рекламных фреймов может задерживать инициализацию.
+                # Extended wait — the site renders the player via JS, and the
+                # appearance of ad frames can delay player initialization.
                 page.wait_for_timeout(4000)
 
-                # Пытаемся закрыть consent/cookie overlay если он есть —
-                # он может блокировать клики по кнопкам плеера.
+                # Try to dismiss a consent/cookie overlay if present — it can
+                # block clicks on the player buttons.
                 self._try_dismiss_consent_overlay(page=page, diagnostics=diagnostics)
 
                 self._collect_all_runtime_candidates(
@@ -167,8 +179,8 @@ class BrowserNetworkExtractor:
 
                 already_clicked: Set[str] = set()
 
-                # Ждём появления кнопки плеера — она может рендериться позже
-                # чем мы начинаем искать. Пробуем несколько типичных селекторов.
+                # Wait for the player button to appear — it may render later
+                # than we start looking. Try several typical selectors.
                 self._wait_for_player_button(page=page, diagnostics=diagnostics)
 
                 priority_clicked = self._try_click_priority_title_buttons(
@@ -191,13 +203,30 @@ class BrowserNetworkExtractor:
                 )
 
                 for round_index in range(self.CLICK_ROUNDS):
-                    # Ранний выход: если уже есть кандидаты пойманные прямым перехватом
-                    # сети (resource_type=media или audio content-type) — они надёжны
-                    # и дальнейшие клики ничего не добавят.
-                    # Кандидаты из inline-скриптов или хуков НЕ считаются — они ещё
-                    # не валидированы и могут быть ложными.
+                    # Re-attempt priority HD/quality clicks each round. Some
+                    # players (e.g. tavr.media) render the HD switch only after
+                    # SD playback has started, so it is missed by the single
+                    # pass before this loop. The short wait spaces out the
+                    # retries to give a late-rendered control time to appear;
+                    # already_clicked keeps this idempotent.
+                    page.wait_for_timeout(2500)
+
+                    late_priority_clicked = self._try_click_priority_title_buttons(
+                        page=page,
+                        stream_candidates=candidates,
+                        diagnostics=diagnostics,
+                        already_clicked=already_clicked
+                    )
+
+                    # Early exit: bail out only once we have a high-confidence
+                    # stream captured by direct network interception AND there was
+                    # no fresh HD/quality button left to click this round. This
+                    # stops us from quitting on the SD autoplay stream before
+                    # switching to HD. Candidates from inline scripts or hooks do
+                    # NOT count — they are not validated yet and may be false
+                    # positives.
                     high_confidence_sources = {"browser_network", "browser_media_element"}
-                    if any(
+                    has_high_confidence = any(
                         c.source in high_confidence_sources
                         and c.contentType
                         and "octet-stream" not in c.contentType.lower()
@@ -207,9 +236,10 @@ class BrowserNetworkExtractor:
                                      or "mpegurl" in (c.contentType or "").lower()
                                      or "ogg" in (c.contentType or "").lower()))
                         for c in candidates
-                    ):
+                    )
+                    if has_high_confidence and late_priority_clicked == 0:
                         diagnostics.append(
-                            f"Click rounds skipped: high-confidence stream already captured before round {round_index + 1}."
+                            f"Click rounds skipped: high-confidence stream captured and no further HD/quality button before round {round_index + 1}."
                         )
                         break
 
@@ -225,30 +255,30 @@ class BrowserNetworkExtractor:
                         f"Click round finished: {round_index + 1}, clicked: {clicked_count}"
                     )
 
-                    # Увеличенное ожидание после клика — некоторые плееры
-                    # (mytuner, radiostationusa) запускают поток медленно
+                    # Extended wait after the click — some players
+                    # (mytuner, radiostationusa) start the stream slowly.
                     wait_ms = 4000 if clicked_count > 0 else 2000
-                    # После клика пробуем вызвать внутренние функции плеера напрямую.
-                    # Некоторые плееры (MyTuner) используют external_player флаг
-                    # который в headless режиме перенаправляет на window.open вместо
-                    # реального запуска потока. Вызываем update() напрямую.
+                    # After the click, try calling the player's internal functions
+                    # directly. Some players (MyTuner) use an external_player flag
+                    # that, in headless mode, redirects to window.open instead of
+                    # actually starting the stream. Call update() directly.
                     try:
                         page.evaluate(
                             """
                             () => {
-                                // MyTuner: force external_player=false и вызвать update()
+                                // MyTuner: force external_player=false and call update()
                                 if (typeof window.external_player !== 'undefined') {
                                     window.external_player = false;
                                 }
-                                // Вызвать update() напрямую если есть
+                                // Call update() directly if present
                                 if (typeof window.update === 'function') {
                                     try { window.update(); } catch(e) {}
                                 }
-                                // Или playRadio() с пропуском external_player
+                                // Or playRadio() bypassing external_player
                                 if (typeof window.playRadio === 'function') {
                                     try { window.playRadio(); } catch(e) {}
                                 }
-                                // Попробовать другие типичные функции плееров
+                                // Try other typical player functions
                                 const tryFns = ['play', 'startPlay', 'startStream', 'startRadio',
                                                 'radioPlay', 'playerPlay', 'initPlayer'];
                                 for (const fn of tryFns) {
@@ -263,8 +293,8 @@ class BrowserNetworkExtractor:
                     except Exception as ex:
                         diagnostics.append(f"Direct JS call failed: {ex}")
 
-                    # После клика ждём появления src на audio/video элементах
-                    # (некоторые плееры типа MyTuner устанавливают src асинхронно)
+                    # After the click, wait for src to appear on audio/video
+                    # elements (some players such as MyTuner set src asynchronously).
                     try:
                         page.wait_for_function(
                             """
@@ -803,10 +833,10 @@ class BrowserNetworkExtractor:
         candidates: List[StreamCandidate],
         diagnostics: List[str]
     ):
-        # FIX 1: Вся обработка тела ответа обёрнута в try/except с явной
-        # проверкой что URL не является потоковым медиа-эндпоинтом.
-        # response.body() на живом аудио-стриме блокирует поток навсегда —
-        # это и было причиной зависания на onlineradiobox.com.
+        # FIX 1: All response-body handling is wrapped in try/except, with an
+        # explicit check that the URL is not a streaming media endpoint.
+        # Calling response.body() on a live audio stream blocks forever — that
+        # was the cause of the hang on onlineradiobox.com.
         try:
             response_url = response.url
             status = response.status
@@ -906,9 +936,10 @@ class BrowserNetworkExtractor:
         parsed = urlparse(url)
         host = (parsed.netloc or "").lower()
 
-        # Никогда не читаем тело медиа-ресурсов, аудио/видео потоков и HTML-страниц.
-        # HTML создаёт мусорных кандидатов из навигационных ссылок (o.tavr.media/roksbal и т.п.)
-        # Аудио/медиа приводят к зависанию при чтении живого потока.
+        # Never read the body of media resources, audio/video streams or HTML
+        # pages. HTML produces junk candidates from navigation links
+        # (o.tavr.media/roksbal etc.). Audio/media cause a hang when reading a
+        # live stream.
         if lower_resource in ("image", "font", "stylesheet", "media", "document"):
             return False
 
@@ -932,9 +963,9 @@ class BrowserNetworkExtractor:
         if any(path.endswith(ext) for ext in audio_extensions):
             return False
 
-        # Никогда не читаем тело если URL сам выглядит как потоковый эндпоинт —
-        # даже если content-type ещё не определён. Это предотвращает зависание
-        # на onlineradiobox и аналогичных плеерах где стрим запрашивается через fetch.
+        # Never read the body if the URL itself looks like a streaming endpoint —
+        # even if the content-type is not known yet. This prevents the hang on
+        # onlineradiobox and similar players where the stream is requested via fetch.
         if self._is_url_potentially_stream(url):
             return False
 
@@ -944,14 +975,14 @@ class BrowserNetworkExtractor:
         if "javascript" in lower_type:
             return True
 
-        # Только text/plain и text/xml — не text/html
+        # Only text/plain and text/xml — not text/html
         if lower_type.startswith("text/plain") or lower_type.startswith("text/xml"):
             return True
 
         if lower_url.endswith(".js") or lower_url.endswith(".json"):
             return True
 
-        # Явно сканируем API-эндпоинты (radio.net, onlineradiobox и подобные).
+        # Explicitly scan API endpoints (radio.net, onlineradiobox and similar).
         if host.startswith("api.") or "/api/" in lower_url:
             return True
 
@@ -1312,11 +1343,12 @@ class BrowserNetworkExtractor:
 
     def _wait_for_player_button(self, page, diagnostics: List[str]):
         """
-        Ждёт появления кнопки плеера в DOM.
-        Приоритет — кнопки с title (они нужны _try_click_priority_title_buttons).
-        Класс-based селекторы используются только как запасной вариант.
+        Waits for the player button to appear in the DOM.
+        Priority is buttons with a title (those are what
+        _try_click_priority_title_buttons needs). Class-based selectors are
+        used only as a fallback.
         """
-        # Title-based selectors — именно их ищет _try_click_priority_title_buttons
+        # Title-based selectors — exactly what _try_click_priority_title_buttons looks for
         title_selectors = [
             'button[title*="play" i]',
             '[role="button"][title*="play" i]',
@@ -1325,7 +1357,7 @@ class BrowserNetworkExtractor:
             '[onclick][title*="play" i]',
         ]
 
-        # Ждём любой из title-based кнопок до 5 секунд суммарно
+        # Wait for any of the title-based buttons, up to ~5 seconds total
         for selector in title_selectors:
             try:
                 page.wait_for_selector(selector, timeout=1500, state="attached")
@@ -1334,7 +1366,7 @@ class BrowserNetworkExtractor:
             except Exception:
                 continue
 
-        # Запасной вариант — кнопки по классу (jp-play, class*=play)
+        # Fallback — buttons by class (jp-play, class*=play)
         fallback_selectors = [
             '[class*="jp-play"]',
             'button[class*="play" i]',
@@ -1606,9 +1638,9 @@ class BrowserNetworkExtractor:
 
         for frame_index, frame in enumerate(frames):
             try:
-                # Используем синхронный вариант без await — async evaluate
-                # с await на кросс-origin фреймах может зависнуть навсегда
-                # если play() возвращает Promise который не резолвится.
+                # Use the synchronous variant without await — an async evaluate
+                # with await on cross-origin frames can hang forever if play()
+                # returns a Promise that never resolves.
                 started_urls = frame.evaluate(
                     """
                     () => {
@@ -1729,6 +1761,15 @@ class BrowserNetworkExtractor:
                             seen.add(element);
 
                             const title = normalize(element.getAttribute('title'));
+
+                            // Never click pause/stop toggles. On players that
+                            // autoplay, the play button's title flips to "pause"
+                            // (e.g. "click to pause playback"), and clicking it
+                            // would stop the very stream we are trying to capture.
+                            if (title.includes('pause') || title.includes('stop')) {
+                                continue;
+                            }
+
                             const classAndId = normalize(element.className + ' ' + element.id);
                             const description = getDescription(element);
                             const key = makeKey(element);
@@ -1774,8 +1815,8 @@ class BrowserNetworkExtractor:
 
             diagnostics.append(f"Priority title-button candidates found: {len(click_candidates or [])}")
 
-            # Диагностика: перечисляем ВСЕ кнопки с title на странице,
-            # чтобы понять почему приоритетные кнопки не найдены.
+            # Diagnostics: list ALL buttons with a title on the page, to
+            # understand why the priority buttons were not found.
             if not click_candidates:
                 try:
                     all_titled = page.evaluate(
@@ -2061,9 +2102,9 @@ class BrowserNetworkExtractor:
                             || !!element.getAttribute('data-play')
                             || !!element.getAttribute('data-player')
                             // img/div/span with play-related id or class
-                            || /play/.test(id)
-                            || /listen/.test(id)
-                            || /play(-button|btn|icon)?/.test(cls);
+                            || /play/.test(id)
+                            || /listen/.test(id)
+                            || /play(-button|btn|icon)?/.test(cls);
                     }
 
                     function getAttributeHaystack(element) {
@@ -2681,9 +2722,9 @@ class BrowserNetworkExtractor:
         validated: List[StreamCandidate] = []
 
         for candidate in candidates:
-            # Кандидаты пойманные Playwright напрямую как audio/* или media —
-            # они уже валидированы самим браузером, дополнительная проверка не нужна
-            # и может зависнуть (голые IP, нестандартные порты, Icecast).
+            # Candidates caught by Playwright directly as audio/* or media are
+            # already validated by the browser itself; an extra check is
+            # unnecessary and can hang (bare IPs, non-standard ports, Icecast).
             already_confirmed = (
                 candidate.source == "browser_network"
                 and candidate.contentType
@@ -2699,9 +2740,9 @@ class BrowserNetworkExtractor:
             )
 
             if already_confirmed:
-                # HTTP 206 Partial Content = браузер запросил Range для файла.
-                # Живые потоки всегда отвечают 200. Исключаем 206-кандидаты
-                # с путями файлового хранилища (/upload/, /files/, /media/ и т.п.)
+                # HTTP 206 Partial Content = the browser requested a Range for a
+                # file. Live streams always answer 200. Exclude 206 candidates
+                # with file-storage paths (/upload/, /files/, /media/, etc.).
                 status = candidate.httpStatusCode or 0
                 url_lower = (candidate.url or "").lower()
                 is_file_download = (
@@ -2749,10 +2790,10 @@ class BrowserNetworkExtractor:
 
     def _collapse_temporary_duplicates(self, candidates: List[StreamCandidate]) -> List[StreamCandidate]:
         """
-        Если для одного потока есть и временный URL (с nonce/query, isTemporary=True)
-        и валидированный стабильный (query-stripped, isTemporary=False) —
-        убираем временный дубликат из финального результата.
-        Это решает проблему с 4 кандидатами вместо 2 для радио рокс.
+        If a single stream has both a temporary URL (with nonce/query,
+        isTemporary=True) and a validated stable one (query-stripped,
+        isTemporary=False), drop the temporary duplicate from the final result.
+        This fixes the 4-candidates-instead-of-2 problem for Radio ROKS.
         """
         stable_keys: set = set()
 
@@ -2805,8 +2846,8 @@ class BrowserNetworkExtractor:
 
     def _is_js_template_or_malformed_url(self, url: str) -> bool:
         """
-        Отсеивает URL, которые являются артефактами JS-кода, а не настоящими
-        адресами потоков. Например:
+        Filters out URLs that are artifacts of JS code rather than real stream
+        addresses. For example:
           http://cdn.onlineradiobox.com/js/'+href+
           http://cdn.onlineradiobox.com/js/"+opts.stream+
           https://${t}.${this.scriptDomain}/microplayer`;return
@@ -3042,13 +3083,13 @@ class BrowserNetworkExtractor:
         if not host:
             return False
 
-        # Голый IP-адрес как хост — почти всегда Icecast/Shoutcast стрим
+        # A bare IP address as host is almost always an Icecast/Shoutcast stream
         import re as _re
         if _re.fullmatch(r'[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+(:[0-9]+)?', host):
             return True
 
-        # Нестандартный порт (не 80/443/8080/8443) — признак Icecast/Shoutcast/SHOUTcast
-        # Типичные порты: 8000, 8444, 9720, 19800 и т.д.
+        # Non-standard port (not 80/443/8080/8443) — a sign of
+        # Icecast/Shoutcast/SHOUTcast. Typical ports: 8000, 8444, 9720, 19800, etc.
         port_match = _re.search(r':(\d+)$', host)
         if port_match:
             port = int(port_match.group(1))
@@ -3356,4 +3397,3 @@ class BrowserNetworkExtractor:
             result.append(value)
 
         return result
-
