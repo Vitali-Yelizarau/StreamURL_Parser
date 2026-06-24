@@ -8,6 +8,26 @@
 venv/
 env/
 
+browsers/
+dist/
+build/
+
+__pycache__/
+*.pyc
+*.pyo
+
+*.log
+*.bak
+*.bak_*
+*.tmp
+
+.env
+.env.*
+
+.venv/
+venv/
+env/
+
 dist/
 build/
 *.spec
