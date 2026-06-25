@@ -14,8 +14,11 @@ it discovers the direct audio stream URL suitable for playback in media players
 
 2. **Browser network extractor** — launches a headless Chromium browser (via Playwright),
    instruments fetch/XHR/Audio hooks, and intercepts all network traffic while the page
-   loads and plays. Used as a fallback when the static extractor finds nothing.
-   Works for JS-heavy players (MyTuner, TAVR, radio.net, etc.).
+   loads and plays. Along the way it dismisses cookie-consent overlays, skips pre-roll
+   video ads, and clicks play / "play in HD" controls — including buttons that live
+   inside cross-origin iframes (e.g. TuneIn embed players). Used as a fallback when the
+   static extractor finds nothing. Works for JS-heavy players (MyTuner, TAVR, radio.net,
+   TuneIn-embedded WordPress sites, etc.).
 
 3. **Stream validator** — validates each candidate URL via HEAD/GET requests,
    handles ICY/Shoutcast responses, follows redirects, and parses M3U/PLS playlists.
@@ -28,7 +31,7 @@ Results are returned as JSON on stdout. Debug logs go to stderr.
 
 - Python 3.9+
 - A virtual environment with dependencies installed (see [Setup](#setup))
-- Chromium browser installed for Playwright (see [Setup](#setup))
+- Chromium headless shell installed for Playwright (see [Setup](#setup))
 
 ---
 
@@ -43,10 +46,12 @@ python -m venv .venv
 # absolute path and stops working if the project folder is ever moved.
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 
-# Install Chromium for Playwright (for running from source / dev mode).
-# For a release build, install into a local browsers\ folder instead — see
-# "Building the Executable".
-.venv\Scripts\python.exe -m playwright install chromium
+# Install the Chromium headless shell for Playwright (for running from source /
+# dev mode). The parser always launches headless, so the lightweight
+# headless-shell build is all that is needed — it is roughly half the size of the
+# full Chromium download. For a release build, install into a local browsers\
+# folder instead — see "Building the Executable".
+.venv\Scripts\python.exe -m playwright install chromium-headless-shell
 ```
 
 ### Dependencies (`requirements.txt`)
@@ -84,6 +89,11 @@ reading programmatically from C# / other host processes.
 .\.venv\Scripts\python.exe -m stream_parser.main --url "https://example.com/radio" --timeout 30 > result.json
 ```
 
+> **Include the scheme in `--url`.** The browser engine cannot navigate to a bare
+> host like `www.example.com/listen` and will fail with "Cannot navigate to
+> invalid URL", producing no candidates. Always pass a full URL beginning with
+> `http://` or `https://`.
+
 ### Debug mode (JSON + detailed logs)
 
 ```powershell
@@ -119,7 +129,7 @@ the parser will validate it without running the extractors:
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `--url` | string | **required** | Radio station page URL or direct stream/playlist URL |
+| `--url` | string | **required** | Radio station page URL or direct stream/playlist URL (must include `http://` or `https://`) |
 | `--timeout` | int | `20` | Timeout in seconds for HTTP requests and browser operations |
 | `--debug` | flag | off | Print detailed diagnostic logs to stderr |
 
@@ -168,14 +178,18 @@ the parser will validate it without running the extractors:
 > **Important:** Always use `finalUrl` for playback, not `url`.
 > Some streams redirect to a different host.
 
+> **Note on host casing:** `url` / `stableUrl` may preserve the host casing as it
+> appeared on the page (e.g. `mETaLraDio.Net`), while `finalUrl` is normalized.
+> When deduplicating by `stableUrl`, compare hosts case-insensitively.
+
 ---
 
 ## Building the Executable
 
 The parser can be packaged into a standalone `.exe` using PyInstaller. The result
 is a folder (`dist\stream_parser\`) containing the executable, its dependencies,
-and a bundled Chromium, so it runs on machines without Python or Playwright
-installed.
+and a bundled Chromium headless shell, so it runs on machines without Python or
+Playwright installed.
 
 > **Build and browser must come from the same venv / Playwright version.** The
 > Chromium revision is pinned to the installed Playwright version. If you build
@@ -195,19 +209,28 @@ Get-ChildItem -Recurse -Filter "__pycache__" | Remove-Item -Recurse -Force
 Get-ChildItem -Recurse -Filter "*.pyc" | Remove-Item -Force
 ```
 
-### 2. Install Chromium into a local `browsers\` folder
+### 2. Install the Chromium headless shell into a local `browsers\` folder
 
 Point `PLAYWRIGHT_BROWSERS_PATH` at a `browsers\` folder in the project root and
-install there (not into the profile), so the browser can be shipped with the build:
+install there (not into the profile), so the browser can be shipped with the
+build. Install only the headless shell — the parser always launches headless, so
+the full Chromium binary is not needed and would roughly double the bundle size:
 
 ```powershell
 $env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\browsers"
-.venv\Scripts\python.exe -m playwright install chromium
+.venv\Scripts\python.exe -m playwright install chromium-headless-shell
 ```
 
 Keep this terminal open — `PLAYWRIGHT_BROWSERS_PATH` lives only in the current
 session, and it is also needed by the next step so PyInstaller's `--collect-all`
 does not pull the browser from the profile instead.
+
+> If you previously ran `playwright install chromium` (which also fetches the full
+> browser), you can delete the leftover full-browser folder to slim the bundle —
+> keep `chromium_headless_shell-*`, remove `chromium-*`:
+> ```powershell
+> Remove-Item -Recurse -Force browsers\chromium-*
+> ```
 
 ### 3. Build
 
@@ -277,6 +300,16 @@ The service:
 - Returns a `DiscoveredRadioStream` with the best candidate's `finalUrl` as `StreamUrl`
 - Appends additional candidates to `Description` as `Also possible stream candidates: ...`
 
+> **Tip:** normalize user-entered URLs before calling the parser — if the input has
+> no scheme, prepend `https://`. The browser engine rejects bare hosts like
+> `www.example.com/listen` ("Cannot navigate to invalid URL"), and end users
+> frequently paste URLs without `http(s)://`.
+
+> **Tip:** some pages (see "catalog-style" stations below) return many validated
+> candidates for one page URL. Consider surfacing the candidate list in the UI so
+> the user can pick the right sub-stream / bitrate rather than auto-assigning all
+> of them to a single station.
+
 ---
 
 ## Known Limitations
@@ -291,9 +324,25 @@ The service:
 - **HD/quality-toggle players** (e.g. tavr.media): when a station autoplays a
   standard-definition stream and exposes a separate "play in HD" switch, the
   parser clicks that switch to also capture the HD stream, returning both
-  candidates (HD first by quality score). Because the HD control on ad-heavy
-  players can render late, HD capture is timing-dependent and may occasionally be
-  missed on a given run — re-running usually picks it up.
+  candidates (HD first by quality score). On ad-supported players it first skips
+  the pre-roll ad so the (late-rendering) HD control can appear. HD capture is
+  still timing-dependent: if a pre-roll is unskippable or outlasts the retry
+  window, only the standard-definition stream is returned for that run —
+  re-running usually picks up the HD stream.
+- **TuneIn-embedded players** (WordPress sites that embed a
+  `tunein.com/embed/player/...` iframe — e.g. croma-music themes): the real Play
+  button lives inside a cross-origin iframe and only responds to a genuine
+  (trusted) click, after which the embedded player resolves the stream via an
+  authenticated TuneIn API call. The parser clicks inside the iframe with a real
+  gesture and scrapes the resulting stream URLs (often several bitrates) from the
+  response body. Ad-heavy embeds can be flaky on a given run; if a station fails,
+  see the manual workflow below — the underlying Icecast stream usually accepts
+  manual entry.
+- **Catalog-style stations** (e.g. RockFM / ATSW / `streamabc.net`-backed sites):
+  the page HTML lists every sub-station mount, so the parser may return many
+  validated candidates (one per sub-stream and bitrate) for a single page URL.
+  These are all genuine streams; pick the one matching the station you want by its
+  mount name (e.g. `.../metal/aac-128/...`).
 - **Sites gated by a cookie consent overlay (CMP):** stations behind a "Accept cookies"
   popup may not start the player until consent is granted. The parser tries known
   CMP frameworks and a multilingual accept-button fallback, but bespoke CMPs may
