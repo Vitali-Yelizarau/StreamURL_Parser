@@ -945,7 +945,18 @@ try:
             'chimpstatic.com',
             'fastly.mmt.delivery',
             'mmt.delivery',
-            'vimeo.com'
+            'vimeo.com',
+            # TuneIn / radiotime service hosts: branding jingles
+            # (cdn-cms.tunein.com) and the catalog/metadata API
+            # (feed/api.radiotime.com) are never the actual station stream — the
+            # real stream lives on the station's own host. Without this, the
+            # TuneIn intro jingle (TuneIn_Switch_Intro_Short.mp3) is accepted as
+            # the stream and the browser fallback that would find the real
+            # stream never runs. NOTE: do NOT block tunein.com / radiotime.com
+            # wholesale — opml.radiotime.com/Tune.ashx is a legit stream resolver.
+            'cdn-cms.tunein.com',
+            'feed.radiotime.com',
+            'api.radiotime.com'
         ]
 
         if any(blocked in host for blocked in blocked_hosts):

@@ -32,7 +32,21 @@ class BrowserNetworkExtractor:
     MAX_TEXT_BODY_BYTES = 1000000
     MAX_HOOK_TEXT_CHARS = 900000
     MAX_CLICK_CANDIDATES = 14
-    CLICK_ROUNDS = 3
+    CLICK_ROUNDS = 5
+
+    # CSS selectors for an HD / quality switch. Used both to score priority
+    # clicks and to detect (cheaply) whether such a control is currently in the
+    # DOM, so the click loop does not give up before a late-rendered HD button
+    # appears (e.g. tavr.media sub-stations render the HD switch only after the
+    # SD autoplay stream has started).
+    HD_QUALITY_SELECTOR = (
+        'button[title*="high definition" i],'
+        '[role="button"][title*="high definition" i],'
+        '[onclick][title*="high definition" i],'
+        'button[title*="quality" i],'
+        '[role="button"][title*="quality" i],'
+        '[onclick][title*="quality" i]'
+    )
 
     def __init__(self, timeout: int = 15, debug: bool = False):
         self.timeout = timeout
@@ -183,6 +197,15 @@ class BrowserNetworkExtractor:
                 # than we start looking. Try several typical selectors.
                 self._wait_for_player_button(page=page, diagnostics=diagnostics)
 
+                # Tracks whether an HD/quality switch (not a plain play button)
+                # has actually been clicked at any point. Once it has, there is
+                # nothing more to wait for and the loop may exit early.
+                self._priority_hd_quality_clicked_ever = False
+
+                # Clear any pre-roll ad first so the real player (and its late
+                # HD/quality switch) can render before we start clicking.
+                self._try_skip_ads(page=page, diagnostics=diagnostics)
+
                 priority_clicked = self._try_click_priority_title_buttons(
                     page=page,
                     stream_candidates=candidates,
@@ -211,6 +234,11 @@ class BrowserNetworkExtractor:
                     # already_clicked keeps this idempotent.
                     page.wait_for_timeout(2500)
 
+                    # Skip any ad that is currently occupying the player; on
+                    # ad-supported stations the HD/quality switch only renders
+                    # once the pre-roll is gone.
+                    self._try_skip_ads(page=page, diagnostics=diagnostics)
+
                     late_priority_clicked = self._try_click_priority_title_buttons(
                         page=page,
                         stream_candidates=candidates,
@@ -219,12 +247,11 @@ class BrowserNetworkExtractor:
                     )
 
                     # Early exit: bail out only once we have a high-confidence
-                    # stream captured by direct network interception AND there was
-                    # no fresh HD/quality button left to click this round. This
-                    # stops us from quitting on the SD autoplay stream before
-                    # switching to HD. Candidates from inline scripts or hooks do
-                    # NOT count — they are not validated yet and may be false
-                    # positives.
+                    # stream captured by direct network interception AND there is
+                    # genuinely no HD/quality button left to click. This stops us
+                    # from quitting on the SD autoplay stream before switching to
+                    # HD. Candidates from inline scripts or hooks do NOT count —
+                    # they are not validated yet and may be false positives.
                     high_confidence_sources = {"browser_network", "browser_media_element"}
                     has_high_confidence = any(
                         c.source in high_confidence_sources
@@ -238,14 +265,55 @@ class BrowserNetworkExtractor:
                         for c in candidates
                     )
                     if has_high_confidence and late_priority_clicked == 0:
-                        diagnostics.append(
-                            f"Click rounds skipped: high-confidence stream captured and no further HD/quality button before round {round_index + 1}."
+                        # Do not bail while an HD/quality switch is still sitting
+                        # in the DOM unclicked — it may have rendered late (tavr
+                        # sub-stations add it only after SD playback begins). Only
+                        # conclude it is truly absent after the button has had a
+                        # couple of rounds (~5s) to appear.
+                        hd_already_done = getattr(
+                            self, "_priority_hd_quality_clicked_ever", False
                         )
-                        break
+                        hd_button_present = self._hd_quality_button_present(page)
+
+                        if hd_already_done:
+                            diagnostics.append(
+                                f"Click rounds skipped: HD/quality stream already captured before round {round_index + 1}."
+                            )
+                            break
+
+                        # Do not give up while an ad still occupies the player:
+                        # the HD/quality switch only renders once the pre-roll is
+                        # gone, so the absence of an HD button right now is not
+                        # conclusive. The CLICK_ROUNDS cap still bounds the wait,
+                        # so an unskippable ad cannot loop forever.
+                        ad_active = self._ad_in_progress(page)
+
+                        if round_index >= 1 and not hd_button_present and not ad_active:
+                            diagnostics.append(
+                                f"Click rounds skipped: high-confidence stream captured and no HD/quality button present before round {round_index + 1}."
+                            )
+                            break
+
+                        # Otherwise keep looping: we are still early, an ad is
+                        # still on screen, or an HD/quality button is present but
+                        # not yet clicked — give the next round a chance.
+                        diagnostics.append(
+                            f"Waiting for HD/quality button (present={hd_button_present}, ad_active={ad_active}) at round {round_index + 1}."
+                        )
 
                     diagnostics.append(f"Click round started: {round_index + 1}")
 
                     clicked_count = self._try_click_play_elements(
+                        page=page,
+                        diagnostics=diagnostics,
+                        already_clicked=already_clicked
+                    )
+
+                    # Main-page clicks above cannot reach buttons inside
+                    # cross-origin iframes (e.g. a TuneIn embed player), because
+                    # page.evaluate / elementFromPoint only see the top document.
+                    # Click inside each child frame directly via frame.evaluate.
+                    clicked_count += self._try_click_play_in_child_frames(
                         page=page,
                         diagnostics=diagnostics,
                         already_clicked=already_clicked
@@ -1682,6 +1750,235 @@ class BrowserNetworkExtractor:
     # Click fallback
     # ---------------------------------------------------------------------
 
+    def _hd_quality_button_present(self, page) -> bool:
+        """Return True if an HD/quality switch is currently in the DOM.
+
+        Cheap synchronous check used by the click loop to decide whether a
+        late-rendering HD button is still worth waiting for. Excludes
+        pause/stop toggles, mirroring the priority-click filter. Any failure
+        is treated as "not present" so the loop can still terminate.
+        """
+        try:
+            return bool(
+                page.evaluate(
+                    """
+                    (selector) => {
+                        for (const el of document.querySelectorAll(selector)) {
+                            const title = String(el.getAttribute('title') || '').toLowerCase();
+                            if (title.includes('pause') || title.includes('stop')) {
+                                continue;
+                            }
+                            return true;
+                        }
+                        return false;
+                    }
+                    """,
+                    self.HD_QUALITY_SELECTOR
+                )
+            )
+        except Exception:
+            return False
+
+    # Keyword-driven ad-skip. Matches the player's own "skip ad(s)" control as
+    # well as common ad-SDK skip buttons (IMA / YouTube). A skip control only
+    # qualifies via free text if it mentions BOTH a skip-like and an ad-like
+    # word, so genuine "skip track / next" buttons are never clicked.
+    _AD_SKIP_FINDER_JS = r"""
+        () => {
+            for (const e of document.querySelectorAll('[data-sp-skip-target]')) {
+                e.removeAttribute('data-sp-skip-target');
+            }
+            const norm = v => String(v || '').toLowerCase();
+            const skipRe = /(skip|dismiss|close|закры|пропуст|\u00fcberspring|passer|saltar|salta|omitir)/i;
+            const adRe = /(ad\b|ads\b|advert|\u0440\u0435\u043a\u043b\u0430\u043c|werbung|publicit|anunci|annonc|\u0440\u0435\u043a\u043b\u0430\u043c\u0430)/i;
+
+            // Known ad-SDK skip controls (highest confidence, no keyword gate).
+            const knownSelectors = [
+                '.ytp-ad-skip-button',
+                '.ytp-ad-skip-button-modern',
+                '.ytp-skip-ad-button',
+                '.videoAdUiSkipButton',
+                '[class*="skip" i][class*="ad" i]',
+                '[id*="skip" i][id*="ad" i]',
+                '[aria-label*="skip ad" i]',
+                '[title*="skip ad" i]'
+            ];
+
+            let best = null;
+            let bestScore = 0;
+
+            function isRendered(el) {
+                const rect = el.getBoundingClientRect();
+                if (rect.width < 2 || rect.height < 2) return false;
+                const style = window.getComputedStyle(el);
+                if (style.visibility === 'hidden' || style.display === 'none') return false;
+                if (parseFloat(style.opacity || '1') < 0.1) return false;
+                return true;
+            }
+
+            function consider(el, score) {
+                if (!el || !isRendered(el)) return;
+                if (score > bestScore) { bestScore = score; best = el; }
+            }
+
+            for (const sel of knownSelectors) {
+                for (const el of document.querySelectorAll(sel)) consider(el, 1000);
+            }
+
+            // Free-text heuristic over plausibly-interactive elements.
+            const interactive = document.querySelectorAll('button,[role="button"],[onclick],a');
+            for (const el of interactive) {
+                const hay = [
+                    norm(el.getAttribute('title')),
+                    norm(el.getAttribute('aria-label')),
+                    norm(el.className),
+                    norm(el.id),
+                    norm((el.textContent || '').slice(0, 40))
+                ].join(' ');
+                if (skipRe.test(hay) && adRe.test(hay)) consider(el, 500);
+            }
+
+            if (!best) return { found: false };
+
+            best.setAttribute('data-sp-skip-target', '1');
+            const description = (
+                best.tagName
+                + ' ' + (best.getAttribute('title')
+                    || best.getAttribute('aria-label')
+                    || (best.textContent || '').trim().slice(0, 40)
+                    || best.className || '')
+            ).trim().slice(0, 160);
+
+            return { found: true, description: description };
+        }
+    """
+
+    _AD_SKIP_SYNTHETIC_CLICK_JS = r"""
+        () => {
+            const el = document.querySelector('[data-sp-skip-target="1"]');
+            if (!el) return;
+            try { el.click(); } catch (e) {}
+            try { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); } catch (e) {}
+        }
+    """
+
+    _AD_SKIP_CLEAR_MARKER_JS = (
+        "() => { for (const e of document.querySelectorAll("
+        "'[data-sp-skip-target]')) e.removeAttribute('data-sp-skip-target'); }"
+    )
+
+    _AD_PRESENT_JS = r"""
+        () => {
+            const norm = v => String(v || '').toLowerCase();
+            const skipRe = /(skip|dismiss|close|закры|пропуст)/i;
+            const adRe = /(ad\b|ads\b|advert|\u0440\u0435\u043a\u043b\u0430\u043c|werbung|publicit)/i;
+
+            function visible(el) {
+                const rect = el.getBoundingClientRect();
+                if (rect.width < 2 || rect.height < 2) return false;
+                const style = window.getComputedStyle(el);
+                return style.visibility !== 'hidden' && style.display !== 'none'
+                    && parseFloat(style.opacity || '1') >= 0.1;
+            }
+
+            // A visible skip control means an ad is on screen right now.
+            const knownSelectors = [
+                '.ytp-ad-skip-button', '.ytp-ad-skip-button-modern',
+                '.videoAdUiSkipButton', '.ima-ad-container',
+                '[class*="ad-container" i]', '[id*="ad-container" i]'
+            ];
+            for (const sel of knownSelectors) {
+                for (const el of document.querySelectorAll(sel)) {
+                    if (visible(el)) return true;
+                }
+            }
+
+            for (const el of document.querySelectorAll('button,[role="button"],[onclick],a')) {
+                if (!visible(el)) continue;
+                const hay = norm(el.getAttribute('title')) + ' '
+                    + norm(el.getAttribute('aria-label')) + ' '
+                    + norm((el.textContent || '').slice(0, 40));
+                if (skipRe.test(hay) && adRe.test(hay)) return true;
+            }
+            return false;
+        }
+    """
+
+    def _ad_in_progress(self, page) -> bool:
+        """Cheap check: is an ad (with a skip control / ad container) on screen?
+
+        Used by the click loop to keep waiting for a late HD button instead of
+        bailing on the SD stream while a pre-roll still occupies the player.
+        Any failure is treated as "no ad" so the loop can still terminate.
+        """
+        try:
+            return bool(page.evaluate(self._AD_PRESENT_JS))
+        except Exception:
+            return False
+
+    def _try_skip_ads(self, page, diagnostics: List[str]) -> int:
+        """Find and click ad-skip controls via a REAL Playwright gesture.
+
+        Searches the main document and every child frame (ad SDKs often run in
+        a cross-origin iframe). Not gated by already_clicked: a skip control may
+        be timer-locked on one round and become clickable on the next, and a new
+        ad may appear later, so re-attempting each round is intended. Returns the
+        number of skip clicks performed.
+        """
+        clicked_total = 0
+
+        contexts = [page]
+        try:
+            contexts += [f for f in page.frames if f != page.main_frame]
+        except Exception:
+            pass
+
+        for ctx_index, ctx in enumerate(contexts):
+            try:
+                outcome = ctx.evaluate(self._AD_SKIP_FINDER_JS)
+            except Exception:
+                continue
+
+            if not outcome or not outcome.get("found"):
+                continue
+
+            description = outcome.get("description") or "ad skip control"
+            target = ctx.locator('[data-sp-skip-target="1"]').first
+            click_mode = "synthetic"
+
+            try:
+                target.click(timeout=2000)
+                click_mode = "real"
+            except Exception:
+                try:
+                    target.click(timeout=1500, force=True)
+                    click_mode = "real(force)"
+                except Exception:
+                    try:
+                        ctx.evaluate(self._AD_SKIP_SYNTHETIC_CLICK_JS)
+                    except Exception:
+                        pass
+
+            try:
+                ctx.evaluate(self._AD_SKIP_CLEAR_MARKER_JS)
+            except Exception:
+                pass
+
+            clicked_total += 1
+            diagnostics.append(
+                f"Ad-skip click ({click_mode}). Context {ctx_index}: {description}"
+            )
+            self.log(f"[BROWSER] Ad-skip click ({click_mode}). {self._shorten(description)}")
+
+            # Brief settle so the player can tear down the ad and render the real
+            # controls (including the late HD switch) before the next check.
+            page.wait_for_timeout(900)
+
+        if clicked_total:
+            diagnostics.append(f"Ad-skip controls clicked: {clicked_total}")
+
+        return clicked_total
+
     def _try_click_priority_title_buttons(
         self,
         page,
@@ -1865,6 +2162,14 @@ class BrowserNetworkExtractor:
 
                 if clicked:
                     clicked_count += 1
+
+                    # Remember if this was specifically an HD/quality switch
+                    # (high definition = 1000, hd/hq class = 500, quality = 300)
+                    # rather than a plain play button (<= ~130). The click loop
+                    # uses this to know the HD job is done and may stop waiting.
+                    if (candidate.get("score") or 0) >= 300:
+                        self._priority_hd_quality_clicked_ever = True
+
                     diagnostics.append(
                         f"Priority title-button clicked: {description}"
                     )
@@ -1994,6 +2299,247 @@ class BrowserNetworkExtractor:
 
         return clicked_count
 
+    def _try_click_play_in_child_frames(
+        self,
+        page,
+        diagnostics: List[str],
+        already_clicked: Set[str]
+    ) -> int:
+        """Find and click a play/quality control INSIDE child frames.
+
+        The main-page click path is coordinate-based (page.mouse.click +
+        elementFromPoint) and cannot reach controls inside cross-origin iframes
+        (e.g. a TuneIn embed whose play button is a `<div class="play-button
+        paused">`). Here we run the finder AND the click inside each child frame
+        via frame.evaluate, so no cross-frame coordinate math is needed and the
+        same-origin policy is not in the way (each frame evaluates in its own
+        context). The resulting stream request is captured at the browser level
+        by the normal response hook.
+        """
+        clicked_total = 0
+
+        try:
+            main_frame = page.main_frame
+        except Exception:
+            main_frame = None
+
+        frames = list(page.frames)
+
+        for frame_index, frame in enumerate(frames):
+            if main_frame is not None and frame == main_frame:
+                continue
+
+            try:
+                outcome = frame.evaluate(
+                    r"""
+                    () => {
+                        const actionRegex = /(^|[^a-zа-яёіїєґ0-9])(play|listen|start|стрим|stream|onair|on-air|now-playing|слухати|слухай|слушать|слушай|играть|играй|включить|reproducir|reproduce|escuchar|escucha|en-vivo|envivo|en-directo|abspielen|hören|hoeren|wiedergabe|jouer|ecouter|écouter|écoute|en-direct|ascolta|riproduci|in-diretta|ouvir|escutar|ao-vivo|odsluchaj|sluchaj|na-żywo|na-zywo|slušati|slušaj|uživo|poslouchat|poslouchám|naživo|poslúchať|na-živo|akouste|akoute|απευθείας|dinle|canlı|spela|lyssna|lyssnar|kuuntele|suorana|spil|lyt|live-radio|live-stream|tinhle|nghe|fáradj|hallgasd|live|trực-tiếp|播放|聽|听|재생|들기|聞く|聴く|재생하기)([^a-zа-яёіїєґ0-9]|$)/i;
+                        const qualityRegex = /(^|[^a-z0-9])(hd|hq|high|quality|definition|bitrate|kbps|128|192|256|320)([^a-z0-9]|$)/i;
+                        const negativeActionRegex = /(^|[^a-z])(pause|stop)([^a-z]|$)/i;
+                        const negativeWords = [
+                            'advert', 'ads', 'ad-', 'banner', 'google', 'doubleclick',
+                            'bidmatic', 'cookie', 'consent', 'privacy', 'facebook',
+                            'twitter', 'telegram', 'instagram', 'share', 'social',
+                            'playlist', 'track', 'artist', 'song', 'download', 'install'
+                        ];
+
+                        const normalize = v => String(v || '').toLowerCase();
+                        const hasAction = v => actionRegex.test(normalize(v));
+                        const hasQuality = v => qualityRegex.test(normalize(v));
+                        const hasNegative = v => {
+                            const l = normalize(v);
+                            if (negativeActionRegex.test(l)) return true;
+                            return negativeWords.some(w => l.includes(w));
+                        };
+
+                        const isVisible = el => {
+                            const s = window.getComputedStyle(el);
+                            const r = el.getBoundingClientRect();
+                            if (!r) return false;
+                            if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false;
+                            if (r.width < 6 || r.height < 6) return false;
+                            return true;
+                        };
+
+                        const clsOf = el => (typeof el.className === 'string' ? el.className : '').toLowerCase();
+                        const idOf = el => (el.id || '').toLowerCase();
+
+                        const isInteractive = el => {
+                            const t = el.tagName.toLowerCase();
+                            const id = idOf(el);
+                            const cls = clsOf(el);
+                            return t === 'button'
+                                || t === 'a'
+                                || el.getAttribute('role') === 'button'
+                                || !!el.getAttribute('onclick')
+                                || !!el.getAttribute('data-action')
+                                || !!el.getAttribute('data-play')
+                                || !!el.getAttribute('data-player')
+                                || /play/.test(id)
+                                || /listen/.test(id)
+                                || /play(-button|btn|icon)?/.test(cls);
+                        };
+
+                        const haystack = el => [
+                            el.tagName,
+                            el.id,
+                            (typeof el.className === 'string' ? el.className : ''),
+                            el.getAttribute('role'),
+                            el.getAttribute('aria-label'),
+                            el.getAttribute('title'),
+                            el.getAttribute('data-action'),
+                            (el.textContent || '').slice(0, 40)
+                        ].filter(Boolean).join(' ');
+
+                        let best = null;
+                        let bestScore = -1;
+
+                        const nodes = document.querySelectorAll(
+                            'button, a, div, span, [role="button"], [onclick], [class*="play"], [id*="play"]'
+                        );
+
+                        for (const el of nodes) {
+                            if (!isInteractive(el)) continue;
+                            if (!isVisible(el)) continue;
+
+                            const hs = haystack(el);
+                            if (hasNegative(hs)) continue;
+
+                            const action = hasAction(hs);
+                            const quality = hasQuality(hs);
+                            if (!action && !quality) continue;
+
+                            const cls = clsOf(el);
+                            const id = idOf(el);
+
+                            let score = 0;
+                            if (action) score += 100;
+                            if (quality) score += 30;
+                            if (/play(-|_)?button/.test(cls) || /play(-|_)?button/.test(id)) score += 80;
+                            if (/(^|[^a-z])play([^a-z]|$)/.test(cls) || /(^|[^a-z])play([^a-z]|$)/.test(id)) score += 40;
+                            if (el.tagName.toLowerCase() === 'button') score += 20;
+
+                            if (score > bestScore) {
+                                bestScore = score;
+                                best = el;
+                            }
+                        }
+
+                        if (!best) {
+                            return { clicked: false, description: '' };
+                        }
+
+                        const description = (
+                            best.tagName
+                            + ' .' + (typeof best.className === 'string' ? best.className.trim().replace(/\s+/g, '.') : '')
+                            + ' ' + (best.getAttribute('title') || best.getAttribute('aria-label') || '')
+                        ).trim().slice(0, 160);
+
+                        // Do NOT click synthetically here. Mark the chosen element
+                        // so the Python side can perform a REAL Playwright gesture
+                        // (isTrusted=true) on it via a locator. Many embedded
+                        // players (e.g. TuneIn) ignore synthetic dispatchEvent /
+                        // .click() and react only to a trusted user click. Clear
+                        // any stale marker first so the locator is unambiguous.
+                        try {
+                            for (const e of document.querySelectorAll('[data-sp-click-target]')) {
+                                e.removeAttribute('data-sp-click-target');
+                            }
+                        } catch (e) {}
+
+                        try { best.setAttribute('data-sp-click-target', '1'); } catch (e) {}
+
+                        return { found: true, description: description, score: bestScore };
+                    }
+                    """
+                )
+
+                if not outcome or not outcome.get("found"):
+                    continue
+
+                description = outcome.get("description") or "in-frame play button"
+                key = f"frame{frame_index}:{description}"
+
+                # Helper to clear the marker attribute in this frame.
+                clear_marker_js = (
+                    "() => { for (const e of document.querySelectorAll("
+                    "'[data-sp-click-target]')) e.removeAttribute('data-sp-click-target'); }"
+                )
+
+                if key in already_clicked:
+                    try:
+                        frame.evaluate(clear_marker_js)
+                    except Exception:
+                        pass
+                    continue
+
+                already_clicked.add(key)
+                self._current_action_description = description
+
+                # Perform a REAL trusted click via a Playwright locator — this is
+                # the whole point of the marker. Fall back to force-click, then to
+                # a synthetic in-frame click so we never regress below the prior
+                # behaviour.
+                target = frame.locator('[data-sp-click-target="1"]').first
+                click_mode = "synthetic"
+
+                try:
+                    target.click(timeout=3000)
+                    click_mode = "real"
+                except Exception:
+                    try:
+                        target.click(timeout=2000, force=True)
+                        click_mode = "real(force)"
+                    except Exception:
+                        try:
+                            frame.evaluate(
+                                """
+                                () => {
+                                    const el = document.querySelector('[data-sp-click-target="1"]');
+                                    if (!el) return;
+                                    try {
+                                        const oc = el.getAttribute('onclick');
+                                        if (oc) {
+                                            try { el.onclick && el.onclick(); } catch (e) {}
+                                            try { eval(oc); } catch (e) {}
+                                        }
+                                    } catch (e) {}
+                                    try { el.click(); } catch (e) {}
+                                    try { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); } catch (e) {}
+                                }
+                                """
+                            )
+                        except Exception:
+                            pass
+
+                try:
+                    frame.evaluate(clear_marker_js)
+                except Exception:
+                    pass
+
+                clicked_total += 1
+                diagnostics.append(
+                    f"Clicked in-frame play candidate ({click_mode}). Frame: {frame_index}, "
+                    f"Score: {outcome.get('score')}, Description: {description}"
+                )
+                self.log(
+                    f"[BROWSER] In-frame click ({click_mode}). Frame {frame_index}: {self._shorten(description)}"
+                )
+
+                # Give the in-frame player time to resolve and request the stream
+                # before we move on; the response hook captures it at browser level.
+                page.wait_for_timeout(2200)
+                self._current_action_description = ""
+
+            except Exception as ex:
+                err = str(ex)
+                if "detached" not in err.lower() and "destroyed" not in err.lower():
+                    diagnostics.append(
+                        f"In-frame click failed. Frame {frame_index}: {type(ex).__name__}: {ex}"
+                    )
+
+        return clicked_total
+
     def _find_click_candidates(self, page, diagnostics: List[str]):
         try:
             candidates = page.evaluate(
@@ -2004,9 +2550,14 @@ class BrowserNetworkExtractor:
                     const actionRegex = /(^|[^a-zа-яёіїєґ0-9])(play|listen|start|стрим|stream|onair|on-air|now-playing|слухати|слухай|слушать|слушай|играть|играй|включить|reproducir|reproduce|escuchar|escucha|en-vivo|envivo|en-directo|abspielen|hören|hoeren|wiedergabe|jouer|ecouter|écouter|écoute|en-direct|ascolta|riproduci|in-diretta|ouvir|escutar|ao-vivo|odsluchaj|sluchaj|na-żywo|na-zywo|slušati|slušaj|uživo|poslouchat|poslouchám|naživo|poslúchať|na-živo|akouste|akoute|απευθείας|dinle|canlı|spela|lyssna|lyssnar|kuuntele|suorana|spil|lyt|live-radio|live-stream|tinhle|nghe|fáradj|hallgasd|live|trực-tiếp|播放|聽|听|재생|들기|聞く|聴く|재생하기)([^a-zа-яёіїєґ0-9]|$)/i;
                     const qualityRegex = /(^|[^a-z0-9])(hd|hq|high|quality|definition|bitrate|kbps|128|192|256|320)([^a-z0-9]|$)/i;
 
+                    // 'pause'/'stop' as standalone words (or hyphenated, e.g.
+                    // 'pause-button') are real negatives, but the STATE word
+                    // 'paused'/'stopped' must NOT be — a "play-button paused"
+                    // div is the play affordance. Word-boundary match excludes
+                    // 'paused'/'stopped' (no boundary before the trailing letter).
+                    const negativeActionRegex = /(^|[^a-z])(pause|stop)([^a-z]|$)/i;
+
                     const negativeWords = [
-                        'pause',
-                        'stop',
                         'advert',
                         'ads',
                         'ad-',
@@ -2059,6 +2610,9 @@ class BrowserNetworkExtractor:
 
                     function hasNegative(value) {
                         const lower = normalize(value);
+                        if (negativeActionRegex.test(lower)) {
+                            return true;
+                        }
                         return negativeWords.some(word => lower.includes(word));
                     }
 
