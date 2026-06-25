@@ -985,7 +985,20 @@ try:
             '/tag/',
             '/category/',
             '/author/',
-            '/search/'
+            '/search/',
+            # CMS media/upload directories hold STATIC assets (jingles, promo
+            # clips, podcast files, downloads) — never the live stream mount,
+            # which is an Icecast/Shoutcast endpoint on a streaming host. These
+            # static files validate as playable audio (200 + audio/mpeg) exactly
+            # like a real stream, so without a path guard they leak into the
+            # candidate list. Filter by PATH, not by extension: legitimate
+            # streams can still end in .mp3 (e.g. .../256K.mp3), they just never
+            # live under these CMS upload directories.
+            '/upload/',          # Bitrix (e.g. /upload/iblock/<hash>.mp3)
+            '/uploads/',
+            '/iblock/',          # Bitrix infoblock media
+            '/wp-content/',      # WordPress themes/plugins/uploads
+            '/bitrix/',          # Bitrix system assets
         ]
 
         if path.endswith('/feed') or any(token in path for token in blocked_path_tokens):
