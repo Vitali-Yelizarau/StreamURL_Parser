@@ -883,6 +883,86 @@ except Exception:
     pass
 # ---- end GenericStaticExtractor hotfix ----
 
+
+# ---- stream_parser hotfix: hosts that must never be downloaded or scanned ----
+# Separate from the candidate filter below on purpose. The candidate filter only
+# decides whether a URL may BECOME a candidate; it does not stop the crawler from
+# fetching that URL. Script/text queueing uses loose keyword rules ("player" in
+# the URL, for instance), which happily matched macromedia.com/go/getflashplayer
+# and player.vimeo.com/video/ and downloaded them. adobe.com in particular tends
+# to stall until the read timeout expires, burning the whole run.
+_SP_STATIC_NEVER_FETCH_HOSTS = [
+    'googlesyndication.com',
+    'doubleclick.net',
+    'googletagmanager.com',
+    'google-analytics.com',
+    'googleadservices.com',
+    'amazon-adsystem.com',
+    'ahrefs.com',
+    'onesignal.com',
+    'mailchimp.com',
+    'chimpstatic.com',
+    'fastly.mmt.delivery',
+    'mmt.delivery',
+    # Boilerplate referenced from embedded player libraries (MediaElement.js,
+    # jPlayer and friends): the Flash-download link and the Vimeo/YouTube embed
+    # helpers. Never a station stream, and never worth a request.
+    'vimeo.com',
+    'player.vimeo.com',
+    'macromedia.com',
+    'adobe.com',
+    'youtube.com',
+    'youtu.be',
+    'ytimg.com',
+    'facebook.com',
+    'twitter.com',
+    'instagram.com',
+]
+
+
+def _sp_static_is_never_fetch_url(url):
+    if not url:
+        return True
+
+    try:
+        from urllib.parse import urlparse as _sp_urlparse_fetch_guard
+        host = _sp_urlparse_fetch_guard(str(url).strip().lower()).netloc.lower()
+    except Exception:
+        return True
+
+    if not host:
+        return True
+
+    return any(blocked in host for blocked in _SP_STATIC_NEVER_FETCH_HOSTS)
+
+
+try:
+    _sp_original_filter_script_urls = GenericStaticExtractor._filter_script_urls
+    _sp_original_filter_text_like_urls = GenericStaticExtractor._filter_text_like_urls
+
+    def _sp_filter_script_urls_with_host_guard(self, urls):
+        try:
+            allowed = [u for u in (urls or []) if not _sp_static_is_never_fetch_url(u)]
+        except Exception:
+            allowed = urls
+
+        return _sp_original_filter_script_urls(self, allowed)
+
+    def _sp_filter_text_like_urls_with_host_guard(self, urls):
+        try:
+            allowed = [u for u in (urls or []) if not _sp_static_is_never_fetch_url(u)]
+        except Exception:
+            allowed = urls
+
+        return _sp_original_filter_text_like_urls(self, allowed)
+
+    GenericStaticExtractor._filter_script_urls = _sp_filter_script_urls_with_host_guard
+    GenericStaticExtractor._filter_text_like_urls = _sp_filter_text_like_urls_with_host_guard
+except Exception:
+    pass
+# ---- end never-fetch host guard ----
+
+
 # ---- stream_parser hotfix: generic static obvious non-stream filter ----
 try:
     from urllib.parse import urlparse as _sp_urlparse_static_filter
@@ -948,15 +1028,20 @@ try:
             'vimeo.com',
             # TuneIn / radiotime service hosts: branding jingles
             # (cdn-cms.tunein.com) and the catalog/metadata API
-            # (feed/api.radiotime.com) are never the actual station stream — the
+            # (feed/api.radiotime.com) are never the actual station stream - the
             # real stream lives on the station's own host. Without this, the
             # TuneIn intro jingle (TuneIn_Switch_Intro_Short.mp3) is accepted as
             # the stream and the browser fallback that would find the real
             # stream never runs. NOTE: do NOT block tunein.com / radiotime.com
-            # wholesale — opml.radiotime.com/Tune.ashx is a legit stream resolver.
+            # wholesale - opml.radiotime.com/Tune.ashx is a legit stream resolver.
             'cdn-cms.tunein.com',
             'feed.radiotime.com',
-            'api.radiotime.com'
+            'api.radiotime.com',
+            'macromedia.com',
+            'adobe.com',
+            'youtube.com',
+            'youtu.be',
+            'ytimg.com'
         ]
 
         if any(blocked in host for blocked in blocked_hosts):
@@ -987,7 +1072,7 @@ try:
             '/author/',
             '/search/',
             # CMS media/upload directories hold STATIC assets (jingles, promo
-            # clips, podcast files, downloads) — never the live stream mount,
+            # clips, podcast files, downloads) - never the live stream mount,
             # which is an Icecast/Shoutcast endpoint on a streaming host. These
             # static files validate as playable audio (200 + audio/mpeg) exactly
             # like a real stream, so without a path guard they leak into the
@@ -999,6 +1084,13 @@ try:
             '/iblock/',          # Bitrix infoblock media
             '/wp-content/',      # WordPress themes/plugins/uploads
             '/bitrix/',          # Bitrix system assets
+            # Audio CAPTCHA endpoints. Accessibility widgets (Securimage,
+            # KCAPTCHA and friends) expose a "listen to the code" URL returning a
+            # real WAV of spoken digits: 200 + audio/x-wav, indistinguishable
+            # from a stream to the validator. Never the station audio.
+            '/captcha',          # covers /captcha/, /captchas/, captcha.php
+            'securimage',        # securimage_play.php / securimage_show.php
+            'kcaptcha',
         ]
 
         if path.endswith('/feed') or any(token in path for token in blocked_path_tokens):
